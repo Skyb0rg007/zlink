@@ -16,7 +16,6 @@ zlink = { path = "../../zlink", features = ["proxy"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["rt", "macros"] }
-anyhow = "1.0"
 
 [build-dependencies]
 zlink = { path = "../../zlink", features = ["idl-parse"] }
