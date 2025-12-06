@@ -274,12 +274,11 @@ mod server {
         type ReplyStreamParams = ();
         type ReplyError<'ser> = MockError<'ser>;
 
-        async fn handle<'ser, 'de: 'ser, Sock: Socket>(
-            &'ser mut self,
-            call: Call<Self::MethodCall<'de>>,
+        async fn handle<'c, Sock: Socket>(
+            &'c mut self,
+            call: &'c Call<Self::MethodCall<'_>>,
             _conn: &mut Connection<Sock>,
-        ) -> MethodReply<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>>
-        {
+        ) -> MethodReply<Self::ReplyParams<'c>, Self::ReplyStream, Self::ReplyError<'c>> {
             match call.method() {
                 Method::VarlinkService(varlink_service::Method::GetInfo) => {
                     // Return hardcoded info that matches the systemd machine service

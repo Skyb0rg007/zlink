@@ -101,6 +101,14 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             zlink::Error::VarlinkService(varlink_service::Error::InterfaceNotFound { .. })
         ));
 
+        // Locate a target.
+        let target = "Alpha Centauri";
+        let reply = conn.locate(target).await.unwrap()?;
+        let FtlReply::Location(location) = reply else {
+            panic!("Unexpected reply");
+        };
+        assert_eq!(location.name, target);
+
         // Ask for the drive condition, then set them and then ask again.
         let replies = conn
             .chain_get_drive_condition::<FtlReply, FtlError>()?
@@ -150,13 +158,13 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             .chain_jump::<FtlReply, FtlError>(DriveConfiguration {
                 speed: impossible_speed,
                 trajectory: 1,
-                duration: 10,
+                duration,
             })?
             // Now let's try to jump with a valid speed.
             .jump(DriveConfiguration {
                 speed: impossible_speed - 1,
                 trajectory: 1,
-                duration: 10,
+                duration,
             })?
             .send()
             .await?;
@@ -191,26 +199,31 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
 
 #[zlink::proxy("org.example.ftl")]
 trait FtlProxy {
-    async fn get_drive_condition(&mut self) -> zlink::Result<Result<FtlReply, FtlError>>;
+    async fn get_drive_condition(&mut self) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
 
     #[zlink(more, rename = "GetDriveCondition")]
     async fn get_drive_condition_more(
         &mut self,
-    ) -> zlink::Result<impl futures_util::Stream<Item = zlink::Result<Result<FtlReply, FtlError>>>>;
+    ) -> zlink::Result<
+        impl futures_util::Stream<Item = zlink::Result<Result<FtlReply<'_>, FtlError>>>,
+    >;
 
     async fn set_drive_condition(
         &mut self,
         condition: DriveCondition,
-    ) -> zlink::Result<Result<FtlReply, FtlError>>;
+    ) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+
     async fn jump(
         &mut self,
         config: DriveConfiguration,
-    ) -> zlink::Result<Result<FtlReply, FtlError>>;
+    ) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+
+    async fn locate(&mut self, target: &str) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
 }
 
 // The FTL service.
 struct Ftl {
-    drive_condition: notified::State<DriveCondition, FtlReply>,
+    drive_condition: notified::State<DriveCondition, FtlReply<'static>>,
     coordinates: Coordinate,
 }
 
@@ -231,14 +244,14 @@ impl Service for Ftl {
     type MethodCall<'de> = Method<'de>;
     type ReplyParams<'ser> = Reply<'ser>;
     type ReplyStream = notified::Stream<Self::ReplyStreamParams>;
-    type ReplyStreamParams = FtlReply;
+    type ReplyStreamParams = FtlReply<'static>;
     type ReplyError<'ser> = ReplyError<'ser>;
 
-    async fn handle<'ser, 'de: 'ser, Sock: Socket>(
-        &'ser mut self,
-        call: Call<Self::MethodCall<'de>>,
+    async fn handle<'c, Sock: Socket>(
+        &'c mut self,
+        call: &'c Call<Self::MethodCall<'_>>,
         _conn: &mut Connection<Sock>,
-    ) -> MethodReply<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>> {
+    ) -> MethodReply<Self::ReplyParams<'c>, Self::ReplyStream, Self::ReplyError<'c>> {
         match call.method() {
             Method::Ftl(FtlMethod::GetDriveCondition) if call.more() => {
                 MethodReply::Multi(self.drive_condition.stream())
@@ -282,6 +295,23 @@ impl Service for Ftl {
 
                 MethodReply::Single(Some(Reply::Ftl(FtlReply::Coordinates(coords))))
             }
+            Method::Ftl(FtlMethod::Locate { target }) => {
+                if call.more() {
+                    return MethodReply::Error(ReplyError::Ftl(FtlError::ParameterOutOfRange));
+                }
+                // Generate pseudo-random coordinates based on the target string.
+                let coordinates = Coordinate {
+                    longitude: target.len() as f32 * 1.1,
+                    latitude: target.len() as f32 * 2.2,
+                    distance: target.len() as i64 * 10,
+                };
+                let location = Location {
+                    // Return data borrowed from the call.
+                    name: Cow::Borrowed(target),
+                    coordinates,
+                };
+                MethodReply::Single(Some(Reply::Ftl(FtlReply::Location(location))))
+            }
             Method::VarlinkSrv(VarlinkSrvMethod::GetInfo) => {
                 let interfaces = Vec::from_iter(INTERFACES.iter().cloned());
                 let info = Info::new(VENDOR, PRODUCT, VERSION, URL, interfaces);
@@ -317,7 +347,7 @@ struct DriveCondition {
     tylium_level: i64,
 }
 
-impl From<DriveCondition> for FtlReply {
+impl From<DriveCondition> for FtlReply<'static> {
     fn from(drive_condition: DriveCondition) -> Self {
         FtlReply::DriveCondition(drive_condition)
     }
@@ -345,9 +375,21 @@ struct Coordinate {
     distance: i64,
 }
 
-impl From<Coordinate> for FtlReply {
+impl From<Coordinate> for FtlReply<'static> {
     fn from(coordinate: Coordinate) -> Self {
         FtlReply::Coordinates(coordinate)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
+struct Location<'a> {
+    name: Cow<'a, str>,
+    coordinates: Coordinate,
+}
+
+impl<'a> From<Location<'a>> for FtlReply<'a> {
+    fn from(location: Location<'a>) -> Self {
+        FtlReply::Location(location)
     }
 }
 
@@ -359,7 +401,7 @@ impl From<Coordinate> for FtlReply {
 #[serde(untagged)]
 #[allow(unused)]
 enum Method<'a> {
-    Ftl(FtlMethod),
+    Ftl(FtlMethod<'a>),
     #[serde(borrow)]
     VarlinkSrv(VarlinkSrvMethod<'a>),
 }
@@ -368,7 +410,7 @@ enum Method<'a> {
 #[serde(untagged)]
 #[allow(unused)]
 enum Reply<'a> {
-    Ftl(FtlReply),
+    Ftl(FtlReply<'a>),
     VarlinkSrv(VarlinkSrvReply<'a>),
 }
 
@@ -387,18 +429,20 @@ enum ReplyError<'a> {
 #[prefix_all("org.example.ftl.")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method", content = "parameters")]
-enum FtlMethod {
+enum FtlMethod<'a> {
     GetDriveCondition,
     SetDriveCondition { condition: DriveCondition },
     GetCoordinates,
     Jump { config: DriveConfiguration },
+    Locate { target: Cow<'a, str> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
-enum FtlReply {
+enum FtlReply<'a> {
     DriveCondition(DriveCondition),
     Coordinates(Coordinate),
+    Location(Location<'a>),
 }
 
 #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]

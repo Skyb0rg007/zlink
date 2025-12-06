@@ -167,7 +167,7 @@ where
         conn: &mut Connection<Listener::Socket>,
     ) -> crate::Result<Option<Service::ReplyStream>> {
         let mut stream = None;
-        match self.service.handle(call, conn).await {
+        match self.service.handle(&call, conn).await {
             MethodReply::Single(params) => {
                 let reply = Reply::new(params).set_continues(Some(false));
                 conn.send_reply(&reply, vec![]).await?
