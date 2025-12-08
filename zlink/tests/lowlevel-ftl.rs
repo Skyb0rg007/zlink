@@ -247,11 +247,12 @@ impl Service for Ftl {
     type ReplyStreamParams = FtlReply<'static>;
     type ReplyError<'ser> = ReplyError<'ser>;
 
-    async fn handle<'c, Sock: Socket>(
-        &'c mut self,
-        call: &'c Call<Self::MethodCall<'_>>,
+    async fn handle<'service, Sock: Socket>(
+        &'service mut self,
+        call: &'service Call<Self::MethodCall<'_>>,
         _conn: &mut Connection<Sock>,
-    ) -> MethodReply<Self::ReplyParams<'c>, Self::ReplyStream, Self::ReplyError<'c>> {
+    ) -> MethodReply<Self::ReplyParams<'service>, Self::ReplyStream, Self::ReplyError<'service>>
+    {
         match call.method() {
             Method::Ftl(FtlMethod::GetDriveCondition) if call.more() => {
                 MethodReply::Multi(self.drive_condition.stream())
