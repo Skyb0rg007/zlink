@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use zlink::proxy;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Error;
