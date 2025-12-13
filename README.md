@@ -426,6 +426,7 @@ cargo run \
 ### Main Features
 
 - `tokio` (default): Enable tokio runtime integration.
+- `smol`: Enable smol runtime integration.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
