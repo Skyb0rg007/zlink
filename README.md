@@ -17,8 +17,7 @@
 <h1 align="center">zlink</h1>
 
 A Rust implementation of the [Varlink](https://varlink.org/) IPC protocol. zlink provides a safe,
-async API for building Varlink services and clients with support for both standard and embedded
-(no-std) environments.
+async API for building Varlink services and clients.
 
 ## Overview
 
@@ -27,7 +26,6 @@ applications. zlink makes it easy to implement Varlink services in Rust with:
 
 - **Async-first design**: Built on async/await for efficient concurrent operations.
 - **Type safety**: Leverage Rust's type system with derive macros and code generation.
-- **No-std support**: Run on embedded systems.
 - **Multiple transports**: Unix domain sockets and (upcoming) USB support.
 - **Code generation**: Generate Rust code from Varlink IDL files.
 
@@ -427,7 +425,7 @@ cargo run \
 
 ### Main Features
 
-- `tokio` (default): Enable tokio runtime integration and use of standard library.
+- `tokio` (default): Enable tokio runtime integration.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
@@ -438,7 +436,7 @@ cargo run \
 
 - `idl`: Support for IDL type representations.
 - `introspection`: Enable runtime introspection of service interfaces.
-- `idl-parse`: Parse Varlink IDL files at runtime (requires `std`).
+- `idl-parse`: Parse Varlink IDL files at runtime.
 
 ## Getting Help and/or Contributing
 
