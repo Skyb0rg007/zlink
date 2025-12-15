@@ -42,7 +42,7 @@ pub const DESCRIPTION: &crate::idl::Interface<'static> = &{
         &Method::new(
             "GetInterfaceDescription",
             &[INTERFACE_PARAM],
-            &InterfaceDescription::TYPE
+            InterfaceDescription::TYPE
                 .as_object()
                 .unwrap()
                 .as_borrowed()
