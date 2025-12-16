@@ -315,7 +315,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to a batch processing service
     let mut conn = unix::connect("/tmp/batch_processor.varlink").await?;
 
-    // Send multiple pipelined requests without waiting for responses
+    // Send multiple pipelined requests without waiting for responses.
     let replies = conn
         .chain_process::<ProcessReply, ProcessError>(1, "first")?
         .process(2, "second")?

@@ -187,7 +187,7 @@ fn parse_method_arguments<'a>(
 fn build_chain_where_clause(method_where_clause: &Option<syn::WhereClause>) -> syn::WhereClause {
     let mut chain_where_predicates = syn::punctuated::Punctuated::new();
 
-    // Add ReplyParams and ReplyError bounds
+    // Add ReplyParams and ReplyError bounds.
     chain_where_predicates
         .push(syn::parse_quote!(ReplyParams: ::serde::Deserialize<'c> + ::core::fmt::Debug));
     chain_where_predicates

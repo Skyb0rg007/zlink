@@ -33,11 +33,11 @@ use super::{Error, Info, InterfaceDescription};
 ///     .get_interface_description("org.example.interface")?
 ///     .get_info()?;
 ///
-/// // Send the chain and process replies
+/// // Send the chain and process replies.
 /// let replies = chain.send().await?;
 /// pin_mut!(replies);
 ///
-/// // Process each reply in the order they were chained
+/// // Process each reply in the order they were chained.
 /// while let Some(result) = replies.next().await {
 ///     let (reply, _fds) = result?;
 ///     match reply?.parameters().unwrap() {
@@ -75,7 +75,7 @@ use super::{Error, Info, InterfaceDescription};
 ///     // OtherInterface(other_interface::Error<'a>),
 /// }
 ///
-/// // Then use the combined types for cross-interface chaining
+/// // Then use the combined types for cross-interface chaining.
 /// let combined_chain = conn
 ///     .chain_get_info::<CombinedReply<'_>, CombinedError<'_>>()?;
 ///     // .other_interface_method()?;  // Chain calls from other interfaces
@@ -149,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_chain_api_creation() -> crate::Result<()> {
-        // Test that we can create chains with the new API
+        // Test that we can create chains with the new API.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_chain_extension_methods() -> crate::Result<()> {
-        // Test that we can use chain extension methods
+        // Test that we can use chain extension methods.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -191,7 +191,7 @@ mod tests {
         use futures_util::{pin_mut, stream::StreamExt};
         pin_mut!(replies);
 
-        // Read first reply (GetInfo)
+        // Read first reply (GetInfo).
         let (first_reply, _fds) = replies.next().await.unwrap()?;
         let first_reply = first_reply.unwrap();
         match first_reply.parameters().unwrap() {
@@ -205,7 +205,7 @@ mod tests {
             _ => panic!("Expected Info reply"),
         }
 
-        // Read second reply (GetInterfaceDescription)
+        // Read second reply (GetInterfaceDescription).
         let (second_reply, _fds) = replies.next().await.unwrap()?;
         let second_reply = second_reply.unwrap();
         match second_reply.parameters().unwrap() {
@@ -215,7 +215,7 @@ mod tests {
             _ => panic!("Expected InterfaceDescription reply"),
         }
 
-        // Read third reply (GetInfo again)
+        // Read third reply (GetInfo again).
         let (third_reply, _fds) = replies.next().await.unwrap()?;
         let third_reply = third_reply.unwrap();
         match third_reply.parameters().unwrap() {
@@ -225,7 +225,7 @@ mod tests {
             _ => panic!("Expected Info reply"),
         }
 
-        // No more replies
+        // No more replies.
         assert!(replies.next().await.is_none());
 
         Ok(())

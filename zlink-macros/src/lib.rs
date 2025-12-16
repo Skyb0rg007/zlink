@@ -461,7 +461,7 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # }
 /// # impl std::error::Error for BlogError {}
 /// #
-/// // Define proxies for two different services
+/// // Define proxies for two different services.
 /// #[proxy("org.example.blog.Users")]
 /// trait UsersProxy {
 ///     async fn get_user(&mut self, id: u64) -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
@@ -493,11 +493,11 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     .get_posts_by_user(1)?                                   // Get all posts
 ///     .get_user(1)?;                                           // Get user details
 ///
-/// // Send all calls in a single batch
+/// // Send all calls in a single batch.
 /// let replies = chain.send().await?;
 /// pin_mut!(replies);
 ///
-/// // Process replies in order
+/// // Process replies in order.
 /// let mut reply_count = 0;
 /// while let Some((reply, _fds)) = replies.try_next().await? {
 ///     reply_count += 1;
