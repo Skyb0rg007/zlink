@@ -511,4 +511,168 @@ mod tests {
         assert!(no_reply.is_none());
         Ok(())
     }
+
+    #[tokio::test]
+    async fn chain_from_iter() -> crate::Result<()> {
+        use futures_util::stream::StreamExt;
+
+        let responses = [
+            r#"{"parameters":{"id":1}}"#,
+            r#"{"parameters":{"id":2}}"#,
+            r#"{"parameters":{"id":3}}"#,
+        ];
+        let socket = MockSocket::with_responses(&responses);
+        let mut conn = Connection::new(socket);
+
+        let replies = conn
+            .chain_from_iter::<GetUser, User, ApiError, _, _>((1..=3).map(|id| GetUser { id }))?
+            .send()
+            .await?;
+
+        pin_mut!(replies);
+        let results: Vec<_> = replies.collect().await;
+        assert_eq!(results.len(), 3);
+
+        #[cfg(feature = "std")]
+        for (i, result) in results.into_iter().enumerate() {
+            let (reply, _fds) = result?;
+            let user = reply.unwrap();
+            assert_eq!(user.parameters().unwrap().id, (i + 1) as u32);
+        }
+        #[cfg(not(feature = "std"))]
+        for (i, result) in results.into_iter().enumerate() {
+            let user = result?.unwrap();
+            assert_eq!(user.parameters().unwrap().id, (i + 1) as u32);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn chain_from_iter_with_calls() -> crate::Result<()> {
+        use futures_util::stream::StreamExt;
+
+        let responses = [r#"{"parameters":{"id":1}}"#, r#"{"parameters":{"id":2}}"#];
+        let socket = MockSocket::with_responses(&responses);
+        let mut conn = Connection::new(socket);
+
+        let calls = vec![Call::new(GetUser { id: 1 }), Call::new(GetUser { id: 2 })];
+
+        let replies = conn
+            .chain_from_iter::<GetUser, User, ApiError, _, _>(calls)?
+            .send()
+            .await?;
+
+        pin_mut!(replies);
+        let results: Vec<_> = replies.collect().await;
+        assert_eq!(results.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn chain_from_empty_iter_fails() -> crate::Result<()> {
+        let socket = MockSocket::with_responses(&[]);
+        let mut conn = Connection::new(socket);
+
+        let methods: Vec<GetUser> = vec![];
+
+        let result = conn.chain_from_iter::<GetUser, User, ApiError, _, _>(methods);
+
+        assert!(matches!(result, Err(crate::Error::EmptyChain)));
+        Ok(())
+    }
+
+    #[cfg(feature = "std")]
+    #[tokio::test]
+    async fn chain_from_iter_with_fds() -> crate::Result<()> {
+        use crate::{
+            connection::socket::{ReadHalf, WriteHalf},
+            test_utils::mock_socket::MockWriteHalf,
+        };
+        use futures_util::stream::StreamExt;
+        use rustix::{fd::AsFd, io::write};
+        use std::os::unix::net::UnixStream;
+
+        // Create FDs to send with calls.
+        let (send1_r, send1_w) = UnixStream::pair().unwrap();
+        let (send2_r, send2_w) = UnixStream::pair().unwrap();
+        write(send1_w.as_fd(), b"send1").unwrap();
+        write(send2_w.as_fd(), b"send2").unwrap();
+
+        let responses = [r#"{"parameters":{"id":1}}"#, r#"{"parameters":{"id":2}}"#];
+        let socket = MockSocket::new(&responses, vec![]);
+        let (read_half, write_half) = socket.split();
+
+        // Socket wrapper that provides access to the write half after use.
+        #[derive(Debug)]
+        struct TrackingSocket<R, W> {
+            read: R,
+            write: W,
+        }
+
+        impl<R: ReadHalf, W: WriteHalf> crate::connection::Socket for TrackingSocket<R, W> {
+            type ReadHalf = R;
+            type WriteHalf = W;
+
+            fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
+                (self.read, self.write)
+            }
+        }
+
+        #[derive(Debug)]
+        struct TrackingWriteHalf {
+            mock: MockWriteHalf,
+        }
+
+        impl WriteHalf for TrackingWriteHalf {
+            async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> crate::Result<()> {
+                self.mock.write(buf, fds).await
+            }
+        }
+
+        let tracking_write = TrackingWriteHalf { mock: write_half };
+        let mut conn = Connection::new(TrackingSocket {
+            read: read_half,
+            write: tracking_write,
+        });
+
+        let calls_with_fds: Vec<(GetUser, Vec<std::os::fd::OwnedFd>)> = vec![
+            (GetUser { id: 1 }, vec![send1_r.into()]),
+            (GetUser { id: 2 }, vec![send2_r.into()]),
+        ];
+
+        let replies = conn
+            .chain_from_iter_with_fds::<GetUser, User, ApiError, _, _>(calls_with_fds)?
+            .send()
+            .await?;
+
+        // Collect replies to release borrow on conn.
+        let reply_results: Vec<_> = {
+            pin_mut!(replies);
+            replies.collect().await
+        };
+
+        // Verify write-side FD association: WriteConnection sends each message with FDs separately.
+        let fds_written = conn.write_mut().socket.mock.fds_written();
+        assert_eq!(fds_written.len(), 2, "Should have written FDs twice");
+        assert_eq!(fds_written[0].len(), 1, "First call should send 1 FD");
+        assert_eq!(fds_written[1].len(), 1, "Second call should send 1 FD");
+
+        // Verify the FDs contain the expected data.
+        let mut buf = [0u8; 5];
+        rustix::io::read(fds_written[0][0].as_fd(), &mut buf).unwrap();
+        assert_eq!(&buf, b"send1");
+        rustix::io::read(fds_written[1][0].as_fd(), &mut buf).unwrap();
+        assert_eq!(&buf, b"send2");
+
+        // Verify replies.
+        assert_eq!(reply_results.len(), 2);
+        let (reply1, _) = reply_results[0].as_ref().unwrap();
+        assert_eq!(reply1.as_ref().unwrap().parameters().unwrap().id, 1);
+        let (reply2, _) = reply_results[1].as_ref().unwrap();
+        assert_eq!(reply2.as_ref().unwrap().parameters().unwrap().id, 2);
+
+        Ok(())
+    }
 }

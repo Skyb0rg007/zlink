@@ -420,6 +420,173 @@ where
         )
     }
 
+    /// Create a chain from an iterator of method calls.
+    ///
+    /// This allows creating a chain from any iterator yielding method types or calls. Each item
+    /// is automatically converted to a [`Call`] via [`Into<Call<Method>>`]. Unlike
+    /// [`Connection::chain_call`], this method allows building chains from dynamically-sized
+    /// collections.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyChain`] if the iterator is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use zlink_core::Connection;
+    /// use serde::{Serialize, Deserialize};
+    /// use serde_prefix_all::prefix_all;
+    /// use futures_util::{pin_mut, stream::StreamExt};
+    ///
+    /// # async fn example() -> zlink_core::Result<()> {
+    /// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
+    ///
+    /// #[prefix_all("org.example.")]
+    /// #[derive(Debug, Serialize, Deserialize)]
+    /// #[serde(tag = "method", content = "parameters")]
+    /// enum Methods {
+    ///     GetUser { id: u32 },
+    /// }
+    ///
+    /// #[derive(Debug, Deserialize)]
+    /// struct User { name: String }
+    ///
+    /// #[derive(Debug, zlink_core::ReplyError)]
+    /// #[zlink(interface = "org.example", crate = "zlink_core")]
+    /// enum ApiError {
+    ///     UserNotFound { code: i32 },
+    /// }
+    ///
+    /// let user_ids = [1, 2, 3, 4, 5];
+    /// let replies = conn
+    ///     .chain_from_iter::<Methods, User, ApiError, _, _>(
+    ///         user_ids.iter().map(|&id| Methods::GetUser { id })
+    ///     )?
+    ///     .send()
+    ///     .await?;
+    /// pin_mut!(replies);
+    ///
+    /// # #[cfg(feature = "std")]
+    /// while let Some(result) = replies.next().await {
+    ///     let (user_reply, _fds) = result?;
+    ///     // Handle each reply...
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Error::EmptyChain`]: crate::Error::EmptyChain
+    pub fn chain_from_iter<'c, Method, ReplyParams, ReplyError, MethodCall, MethodCalls>(
+        &'c mut self,
+        calls: MethodCalls,
+    ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
+    where
+        Method: Serialize + Debug,
+        ReplyParams: DeserializeOwned + Debug,
+        ReplyError: DeserializeOwned + Debug,
+        MethodCall: Into<Call<Method>>,
+        MethodCalls: IntoIterator<Item = MethodCall>,
+    {
+        let mut iter = calls.into_iter();
+        let first: Call<Method> = iter.next().ok_or(crate::Error::EmptyChain)?.into();
+
+        #[cfg(feature = "std")]
+        let mut chain = Chain::new(self, &first, alloc::vec::Vec::new())?;
+        #[cfg(not(feature = "std"))]
+        let mut chain = Chain::new(self, &first)?;
+
+        for call in iter {
+            let call: Call<Method> = call.into();
+            #[cfg(feature = "std")]
+            {
+                chain = chain.append(&call, alloc::vec::Vec::new())?;
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                chain = chain.append(&call)?;
+            }
+        }
+
+        Ok(chain)
+    }
+
+    /// Create a chain from an iterator of method calls with file descriptors.
+    ///
+    /// Similar to [`Connection::chain_from_iter`], but allows passing file descriptors with each
+    /// call. Each item in the iterator is a tuple of a method type (or [`Call`]) and its
+    /// associated file descriptors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyChain`] if the iterator is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use zlink_core::Connection;
+    /// use serde::{Serialize, Deserialize};
+    /// use serde_prefix_all::prefix_all;
+    /// use std::os::fd::OwnedFd;
+    ///
+    /// # async fn example() -> zlink_core::Result<()> {
+    /// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
+    ///
+    /// #[prefix_all("org.example.")]
+    /// #[derive(Debug, Serialize, Deserialize)]
+    /// #[serde(tag = "method", content = "parameters")]
+    /// enum Methods {
+    ///     SendFile { name: String },
+    /// }
+    ///
+    /// #[derive(Debug, Deserialize)]
+    /// struct FileResult { success: bool }
+    ///
+    /// #[derive(Debug, zlink_core::ReplyError)]
+    /// #[zlink(interface = "org.example", crate = "zlink_core")]
+    /// enum ApiError {
+    ///     SendFailed { reason: String },
+    /// }
+    ///
+    /// let calls_with_fds: Vec<(Methods, Vec<OwnedFd>)> = vec![
+    ///     (Methods::SendFile { name: "file1.txt".into() }, vec![/* fd1 */]),
+    ///     (Methods::SendFile { name: "file2.txt".into() }, vec![/* fd2 */]),
+    /// ];
+    ///
+    /// let replies = conn
+    ///     .chain_from_iter_with_fds::<Methods, FileResult, ApiError, _, _>(calls_with_fds)?
+    ///     .send()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Error::EmptyChain`]: crate::Error::EmptyChain
+    #[cfg(feature = "std")]
+    pub fn chain_from_iter_with_fds<'c, Method, ReplyParams, ReplyError, MethodCall, MethodCalls>(
+        &'c mut self,
+        calls: MethodCalls,
+    ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
+    where
+        Method: Serialize + Debug,
+        ReplyParams: DeserializeOwned + Debug,
+        ReplyError: DeserializeOwned + Debug,
+        MethodCall: Into<Call<Method>>,
+        MethodCalls: IntoIterator<Item = (MethodCall, alloc::vec::Vec<std::os::fd::OwnedFd>)>,
+    {
+        let mut iter = calls.into_iter();
+        let (first, first_fds) = iter.next().ok_or(crate::Error::EmptyChain)?;
+        let first: Call<Method> = first.into();
+        let mut chain = Chain::new(self, &first, first_fds)?;
+
+        for (call, fds) in iter {
+            let call: Call<Method> = call.into();
+            chain = chain.append(&call, fds)?;
+        }
+
+        Ok(chain)
+    }
+
     /// Get the peer credentials.
     ///
     /// This method caches the credentials on the first call.
