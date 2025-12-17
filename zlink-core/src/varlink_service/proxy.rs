@@ -148,7 +148,7 @@ mod tests {
     use crate::{test_utils::mock_socket::MockSocket, Connection};
 
     #[tokio::test]
-    async fn test_chain_api_creation() -> crate::Result<()> {
+    async fn chain_api_creation() -> crate::Result<()> {
         // Test that we can create chains with the new API.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chain_extension_methods() -> crate::Result<()> {
+    async fn chain_extension_methods() -> crate::Result<()> {
         // Test that we can use chain extension methods.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
