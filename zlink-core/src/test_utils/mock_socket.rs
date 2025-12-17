@@ -7,8 +7,6 @@
 #[cfg(feature = "std")]
 use crate::connection;
 use crate::connection::socket::{ReadHalf, Socket, WriteHalf};
-#[cfg(feature = "std")]
-use alloc::vec;
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use core::cell::RefCell;
@@ -18,46 +16,46 @@ use rustix::fd::{BorrowedFd, OwnedFd};
 /// Mock socket implementation for testing.
 ///
 /// This socket pre-loads response data and allows tests to verify what was written.
-/// Responses should be provided as individual strings, and the mock will automatically
-/// add null byte separators between them.
+/// Each message is stored separately and returned one at a time per read() call,
+/// simulating non-pipelined socket behavior where each write is read separately.
 ///
 /// In std mode, also supports file descriptor passing for testing FD-based IPC.
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockSocket {
-    read_data: Vec<u8>,
-    read_pos: usize,
+    /// Each message stored separately with null terminator.
+    messages: Vec<Vec<u8>>,
     #[cfg(feature = "std")]
     fds: Vec<Vec<OwnedFd>>,
-    #[cfg(feature = "std")]
-    fd_index: usize,
 }
 
 impl MockSocket {
     /// Create a new mock socket with pre-configured responses.
     ///
-    /// Each response string will be automatically null-terminated.
-    /// An additional null byte is added at the end to mark the end of all messages.
+    /// Each response string will be null-terminated. Messages are stored separately and
+    /// returned one at a time, with a trailing null added after the last message.
     ///
-    /// In std mode, the `fds` parameter specifies which FDs to return for each read operation.
-    /// Use an empty vec for reads that should not return FDs.
+    /// In std mode, the `fds` parameter specifies which FDs to return with each message.
+    /// The i-th FD vec is returned with the i-th message.
     pub fn new(responses: &[&str], #[cfg(feature = "std")] fds: Vec<Vec<OwnedFd>>) -> Self {
-        let mut data = Vec::new();
+        let mut messages: Vec<Vec<u8>> = responses
+            .iter()
+            .map(|r| {
+                let mut msg = r.as_bytes().to_vec();
+                msg.push(b'\0');
+                msg
+            })
+            .collect();
 
-        for response in responses {
-            data.extend_from_slice(response.as_bytes());
-            data.push(b'\0');
+        // Add trailing null after last message for double-null end detection.
+        if let Some(last) = messages.last_mut() {
+            last.push(b'\0');
         }
-        // Add an extra null byte to mark end of all messages.
-        data.push(b'\0');
 
         Self {
-            read_data: data,
-            read_pos: 0,
+            messages,
             #[cfg(feature = "std")]
             fds,
-            #[cfg(feature = "std")]
-            fd_index: 0,
         }
     }
 
@@ -69,7 +67,7 @@ impl MockSocket {
         Self::new(
             responses,
             #[cfg(feature = "std")]
-            vec![],
+            Vec::new(),
         )
     }
 }
@@ -81,12 +79,11 @@ impl Socket for MockSocket {
     fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
         (
             MockReadHalf {
-                data: self.read_data,
-                pos: self.read_pos,
+                messages: self.messages,
+                msg_index: 0,
+                pos_in_msg: 0,
                 #[cfg(feature = "std")]
                 fds: self.fds,
-                #[cfg(feature = "std")]
-                fd_index: self.fd_index,
             },
             MockWriteHalf {
                 written: Vec::new(),
@@ -101,24 +98,23 @@ impl Socket for MockSocket {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MockReadHalf {
-    data: Vec<u8>,
-    pos: usize,
+    messages: Vec<Vec<u8>>,
+    msg_index: usize,
+    pos_in_msg: usize,
     #[cfg(feature = "std")]
     fds: Vec<Vec<OwnedFd>>,
-    #[cfg(feature = "std")]
-    fd_index: usize,
 }
 
 impl MockReadHalf {
-    /// Get the remaining unread data in the buffer.
-    pub fn remaining_data(&self) -> &[u8] {
-        &self.data[self.pos..]
+    /// Get the number of messages remaining.
+    pub fn messages_remaining(&self) -> usize {
+        self.messages.len().saturating_sub(self.msg_index)
     }
 
     /// Get the number of FD sets that have been consumed (std only).
     #[cfg(feature = "std")]
     pub fn fds_consumed(&self) -> usize {
-        self.fd_index
+        self.msg_index
     }
 }
 
@@ -128,21 +124,29 @@ impl ReadHalf for MockReadHalf {
         &mut self,
         buf: &mut [u8],
     ) -> crate::Result<(usize, alloc::vec::Vec<std::os::fd::OwnedFd>)> {
-        let remaining = self.data.len().saturating_sub(self.pos);
-        if remaining == 0 {
-            return Ok((0, vec![]));
+        // No more messages - EOF.
+        if self.msg_index >= self.messages.len() {
+            return Ok((0, Vec::new()));
         }
 
+        let msg = &self.messages[self.msg_index];
+        let remaining = msg.len() - self.pos_in_msg;
         let to_read = remaining.min(buf.len());
-        buf[..to_read].copy_from_slice(&self.data[self.pos..self.pos + to_read]);
-        self.pos += to_read;
+        buf[..to_read].copy_from_slice(&msg[self.pos_in_msg..self.pos_in_msg + to_read]);
+        self.pos_in_msg += to_read;
 
-        let fds = if self.fd_index < self.fds.len() {
-            let fds = core::mem::take(&mut self.fds[self.fd_index]);
-            self.fd_index += 1;
+        // Return FDs only when message is fully read.
+        let fds = if self.pos_in_msg >= msg.len() {
+            let fds = if self.msg_index < self.fds.len() {
+                core::mem::take(&mut self.fds[self.msg_index])
+            } else {
+                Vec::new()
+            };
+            self.msg_index += 1;
+            self.pos_in_msg = 0;
             fds
         } else {
-            vec![]
+            Vec::new()
         };
 
         Ok((to_read, fds))
@@ -150,14 +154,23 @@ impl ReadHalf for MockReadHalf {
 
     #[cfg(not(feature = "std"))]
     async fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
-        let remaining = self.data.len().saturating_sub(self.pos);
-        if remaining == 0 {
+        // No more messages - EOF.
+        if self.msg_index >= self.messages.len() {
             return Ok(0);
         }
 
+        let msg = &self.messages[self.msg_index];
+        let remaining = msg.len() - self.pos_in_msg;
         let to_read = remaining.min(buf.len());
-        buf[..to_read].copy_from_slice(&self.data[self.pos..self.pos + to_read]);
-        self.pos += to_read;
+        buf[..to_read].copy_from_slice(&msg[self.pos_in_msg..self.pos_in_msg + to_read]);
+        self.pos_in_msg += to_read;
+
+        // Move to next message when current is fully read.
+        if self.pos_in_msg >= msg.len() {
+            self.msg_index += 1;
+            self.pos_in_msg = 0;
+        }
+
         Ok(to_read)
     }
 }
