@@ -7,6 +7,9 @@ async fn streaming_test() {
     use serde_json::json;
     use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
 
+    // Non-streaming methods can use borrowed types.
+    // Streaming methods must use owned types (DeserializeOwned) because the internal buffer may be
+    // reused between stream iterations, which would invalidate borrowed references.
     #[proxy("org.example.Stream")]
     trait StreamProxy {
         async fn get_single(&mut self) -> zlink::Result<Result<SingleReply<'_>, Error>>;
@@ -14,7 +17,7 @@ async fn streaming_test() {
         #[zlink(more)]
         async fn get_stream(
             &mut self,
-        ) -> zlink::Result<impl Stream<Item = zlink::Result<Result<StreamReply<'_>, Error>>>>;
+        ) -> zlink::Result<impl Stream<Item = zlink::Result<Result<StreamReply, Error>>>>;
 
         #[zlink(rename = "CustomStream", more)]
         async fn custom_stream(
@@ -32,16 +35,17 @@ async fn streaming_test() {
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct Error;
 
+    // Non-streaming reply can borrow from the connection buffer.
     #[derive(Debug, Serialize, Deserialize)]
     struct SingleReply<'a> {
         #[serde(borrow)]
         result: &'a str,
     }
 
+    // Streaming reply must be owned (no lifetime parameter).
     #[derive(Debug, Serialize, Deserialize)]
-    struct StreamReply<'a> {
-        #[serde(borrow)]
-        result: &'a str,
+    struct StreamReply {
+        result: String,
     }
 
     // Test get_single

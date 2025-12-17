@@ -6,7 +6,7 @@ use core::{
 };
 use futures_util::stream::Stream;
 use pin_project_lite::pin_project;
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::{
     connection::{socket::ReadHalf, ReadConnection},
@@ -29,6 +29,13 @@ pub(crate) type ChainResult<Params, ReplyError> = reply::Result<Params, ReplyErr
 
 pin_project! {
     /// A stream of replies from a chain of method calls.
+    ///
+    /// # Owned Data Requirement
+    ///
+    /// Stream items must use owned types (`DeserializeOwned`) rather than borrowed types. This is
+    /// because the internal buffer may be reused between stream iterations, which would invalidate
+    /// borrowed references. This limitation may be lifted in the future when Rust supports lending
+    /// streams.
     #[derive(Debug)]
     pub struct ReplyStream<'c, Read: ReadHalf, F, Fut, Params, ReplyError> {
         #[pin]
@@ -47,8 +54,8 @@ where
     Read: ReadHalf,
     F: FnMut(&'c mut ReadConnection<Read>) -> Fut,
     Fut: Future<Output = Result<ChainResult<Params, ReplyError>>>,
-    Params: Deserialize<'c> + Debug,
-    ReplyError: Deserialize<'c> + Debug,
+    Params: DeserializeOwned + Debug,
+    ReplyError: DeserializeOwned + Debug,
 {
     /// Create a new reply stream.
     ///
@@ -73,8 +80,8 @@ where
     Read: ReadHalf,
     F: FnMut(&'c mut ReadConnection<Read>) -> Fut,
     Fut: Future<Output = Result<ChainResult<Params, ReplyError>>>,
-    Params: Deserialize<'c> + Debug,
-    ReplyError: Deserialize<'c> + Debug,
+    Params: DeserializeOwned + Debug,
+    ReplyError: DeserializeOwned + Debug,
 {
     type Item = Result<ChainResult<Params, ReplyError>>;
 

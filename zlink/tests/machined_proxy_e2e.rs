@@ -16,7 +16,7 @@ use zlink::{
     varlink_service::{self, Proxy},
 };
 
-use mock_machined_service::{AcquireMetadata, ListReply, MachinedError, ProcessId};
+use mock_machined_service::{AcquireMetadata, ListReply, MachinedError, OwnedListReply, ProcessId};
 
 #[tokio::test]
 async fn introspect_machined() {
@@ -162,6 +162,8 @@ trait MachineProxy {
         #[zlink(rename = "acquireMetadata")] acquire_metadata: Option<AcquireMetadata>,
     ) -> zlink::Result<Result<ListReply<'_>, MachinedError>>;
 
+    // Streaming methods require owned types (DeserializeOwned) because the internal buffer may be
+    // reused between stream iterations, which would invalidate borrowed references.
     #[zlink(more, rename = "List")]
     async fn list_more(
         &mut self,
@@ -170,7 +172,7 @@ trait MachineProxy {
         #[zlink(rename = "allowInteractiveAuthentication")]
         allow_interactive_authentication: Option<bool>,
         #[zlink(rename = "acquireMetadata")] acquire_metadata: Option<AcquireMetadata>,
-    ) -> zlink::Result<impl Stream<Item = zlink::Result<Result<ListReply<'_>, MachinedError>>>>;
+    ) -> zlink::Result<impl Stream<Item = zlink::Result<Result<OwnedListReply, MachinedError>>>>;
 }
 
 /// Run test with either real systemd service or mock service.

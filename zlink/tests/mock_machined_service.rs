@@ -41,6 +41,31 @@ pub struct ListReply<'a> {
     pub uid_shift: Option<u64>,
 }
 
+// Owned version for streaming APIs (which require DeserializeOwned).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnedListReply {
+    pub name: String,
+    pub id: Option<String>,
+    pub service: Option<String>,
+    pub class: String,
+    pub leader: Option<OwnedProcessId>,
+    #[serde(rename = "rootDirectory")]
+    pub root_directory: Option<String>,
+    pub unit: Option<String>,
+    pub timestamp: Option<Timestamp>,
+    #[serde(rename = "vSockCid")]
+    pub v_sock_cid: Option<u64>,
+    #[serde(rename = "sshAddress")]
+    pub ssh_address: Option<String>,
+    #[serde(rename = "sshPrivateKeyPath")]
+    pub ssh_private_key_path: Option<String>,
+    pub addresses: Option<Vec<Address>>,
+    #[serde(rename = "OSRelease")]
+    pub os_release: Option<Vec<String>>,
+    #[serde(rename = "UIDShift")]
+    pub uid_shift: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, CustomType)]
 #[serde(rename_all = "lowercase")]
 pub enum AcquireMetadata {
@@ -67,6 +92,16 @@ pub struct ProcessId<'a> {
     // According to the IDL, this should be a number but we actually get a string.
     // See https://github.com/systemd/systemd/issues/38276
     pub boot_id: Option<&'a str>,
+}
+
+// Owned version for streaming APIs (which require DeserializeOwned).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct OwnedProcessId {
+    pub pid: i64,
+    #[serde(rename = "pidfdId")]
+    pub pidfd_id: Option<u64>,
+    #[serde(rename = "bootId")]
+    pub boot_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, CustomType)]

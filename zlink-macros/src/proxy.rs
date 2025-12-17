@@ -278,8 +278,8 @@ fn build_chain_extension_trait(
         pub trait #chain_trait_name<'c, S, ReplyParams, ReplyError>
         where
             S: #crate_path::connection::socket::Socket,
-            ReplyParams: ::serde::Deserialize<'c> + ::core::fmt::Debug,
-            ReplyError: ::serde::Deserialize<'c> + ::core::fmt::Debug,
+            ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
+            ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
         {
             #(#chain_extension_methods)*
         }
@@ -288,8 +288,8 @@ fn build_chain_extension_trait(
             for #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
         where
             S: #crate_path::connection::socket::Socket,
-            ReplyParams: ::serde::Deserialize<'c> + ::core::fmt::Debug,
-            ReplyError: ::serde::Deserialize<'c> + ::core::fmt::Debug,
+            ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
+            ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
         {
             #(#chain_extension_impls)*
         }

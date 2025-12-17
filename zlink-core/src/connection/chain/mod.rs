@@ -7,7 +7,7 @@ pub use reply_stream::ReplyStream;
 use crate::{connection::Socket, Call, Connection, Result};
 use core::fmt::Debug;
 use futures_util::stream::Stream;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 
 /// A chain of method calls that will be sent together.
 ///
@@ -31,8 +31,8 @@ pub struct Chain<'c, S: Socket, ReplyParams, ReplyError> {
 impl<'c, S, ReplyParams, ReplyError> Chain<'c, S, ReplyParams, ReplyError>
 where
     S: Socket,
-    ReplyParams: Deserialize<'c> + Debug,
-    ReplyError: Deserialize<'c> + Debug,
+    ReplyParams: DeserializeOwned + Debug,
+    ReplyError: DeserializeOwned + Debug,
 {
     /// Create a new chain with the first call.
     pub(super) fn new<Method>(

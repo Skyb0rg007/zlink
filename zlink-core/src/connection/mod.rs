@@ -25,7 +25,7 @@ use core::{fmt::Debug, sync::atomic::AtomicUsize};
 use socket::FetchPeerCredentials;
 pub use write_connection::WriteConnection;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use socket::Socket;
 
 // Type alias for receive methods - std returns FDs, no_std doesn't
@@ -409,8 +409,8 @@ where
     ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
     where
         Method: Serialize + Debug,
-        ReplyParams: Deserialize<'c> + Debug,
-        ReplyError: Deserialize<'c> + Debug,
+        ReplyParams: DeserializeOwned + Debug,
+        ReplyError: DeserializeOwned + Debug,
     {
         Chain::new(
             self,

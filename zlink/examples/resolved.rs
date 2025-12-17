@@ -22,6 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Build the chain of pipelined requests.
+    // Note: Chain API requires owned types (DeserializeOwned) because the internal buffer may be
+    // reused between stream iterations, which would invalidate borrowed references.
     let mut chain = connection.chain_resolve_hostname::<ReplyParams, ReplyError>(&args[0])?;
     for name in &args[1..] {
         chain = chain.resolve_hostname(name)?;
@@ -57,14 +59,15 @@ trait ResolvedProxy {
     async fn resolve_hostname(
         &mut self,
         name: &str,
-    ) -> zlink::Result<Result<ReplyParams<'_>, ReplyError<'_>>>;
+    ) -> zlink::Result<Result<ReplyParams, ReplyError>>;
 }
 
+// Owned types (required by chain API which needs DeserializeOwned).
 #[derive(Debug, serde::Deserialize)]
-struct ReplyParams<'r> {
+struct ReplyParams {
     addresses: Vec<ResolvedAddress>,
     #[serde(rename = "name")]
-    _name: &'r str,
+    _name: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -106,7 +109,7 @@ enum ProtocolFamily {
 
 #[derive(Debug, ReplyError)]
 #[zlink(interface = "io.systemd.Resolve")]
-enum ReplyError<'e> {
+enum ReplyError {
     NoNameServers,
     NoSuchResourceRecord,
     QueryTimedOut,
@@ -115,11 +118,11 @@ enum ReplyError<'e> {
     QueryAborted,
     DNSSECValidationFailed {
         #[zlink(rename = "result")]
-        _result: &'e str,
+        _result: String,
         #[zlink(rename = "extendedDNSErrorCode")]
         _extended_dns_error_code: Option<i32>,
         #[zlink(rename = "extendedDNSErrorMessage")]
-        _extended_dns_error_message: Option<&'e str>,
+        _extended_dns_error_message: Option<String>,
     },
     NoTrustAnchor,
     ResourceRecordTypeUnsupported,
@@ -132,7 +135,7 @@ enum ReplyError<'e> {
         #[zlink(rename = "extendedDNSErrorCode")]
         _extended_dns_error_code: Option<i32>,
         #[zlink(rename = "extendedDNSErrorMessage")]
-        _extended_dns_error_message: Option<&'e str>,
+        _extended_dns_error_message: Option<String>,
     },
     CNAMELoop,
     BadAddressSize,
@@ -141,10 +144,10 @@ enum ReplyError<'e> {
     ResourceRecordTypeObsolete,
 }
 
-impl Display for ReplyError<'_> {
+impl Display for ReplyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
     }
 }
 
-impl std::error::Error for ReplyError<'_> {}
+impl std::error::Error for ReplyError {}
