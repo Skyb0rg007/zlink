@@ -1,4 +1,4 @@
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, string::String};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "introspection")]
@@ -6,9 +6,9 @@ use crate::introspect;
 
 use crate::ReplyError;
 
-use super::Info;
 #[cfg(feature = "idl")]
 use super::InterfaceDescription;
+use super::{Info, OwnedInfo};
 
 /// `org.varlink.service` interface methods.
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,6 +39,40 @@ pub enum Reply<'a> {
     /// Note: InterfaceDescription only supports 'static lifetime for deserialization.
     #[cfg(feature = "idl")]
     InterfaceDescription(InterfaceDescription<'static>),
+}
+
+/// Owned version of [`Reply`] for use with the chain API.
+///
+/// This type uses owned types ([`OwnedInfo`]) instead of borrowed types, allowing it to be
+/// deserialized as owned data. This is required for the chain API because the internal buffer
+/// may be reused between stream iterations.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OwnedReply {
+    /// Reply for `GetInfo` method.
+    Info(OwnedInfo),
+    /// Reply for `GetInterfaceDescription` method.
+    #[cfg(feature = "idl")]
+    InterfaceDescription(InterfaceDescription<'static>),
+}
+
+#[cfg(feature = "idl")]
+impl<'a> From<Reply<'a>> for OwnedReply {
+    fn from(reply: Reply<'a>) -> Self {
+        match reply {
+            Reply::Info(info) => OwnedReply::Info(info.into()),
+            Reply::InterfaceDescription(desc) => OwnedReply::InterfaceDescription(desc),
+        }
+    }
+}
+
+#[cfg(not(feature = "idl"))]
+impl<'a> From<Reply<'a>> for OwnedReply {
+    fn from(reply: Reply<'a>) -> Self {
+        match reply {
+            Reply::Info(info) => OwnedReply::Info(info.into()),
+        }
+    }
 }
 
 /// Errors that can be returned by the `org.varlink.service` interface.
@@ -128,6 +162,92 @@ impl core::fmt::Display for Error<'_> {
             Error::MethodNotImplemented { method } => {
                 write!(f, "Method not implemented: {method}")
             }
+        }
+    }
+}
+
+/// Owned version of [`Error`] for use with the chain API.
+///
+/// This type uses `String` instead of `Cow<'_, str>` for all fields, allowing it to be deserialized
+/// as owned data. This is required for the chain API because the internal buffer may be reused
+/// between stream iterations.
+#[derive(Debug, Clone, PartialEq, crate::ReplyError)]
+#[zlink(interface = "org.varlink.service")]
+pub enum OwnedError {
+    /// The requested interface was not found.
+    InterfaceNotFound {
+        /// The interface that was not found.
+        interface: String,
+    },
+    /// The requested method was not found.
+    MethodNotFound {
+        /// The method that was not found.
+        method: String,
+    },
+    /// The interface defines the requested method, but the service does not implement it.
+    MethodNotImplemented {
+        /// The method that is not implemented.
+        method: String,
+    },
+    /// One of the passed parameters is invalid.
+    InvalidParameter {
+        /// The parameter that is invalid.
+        parameter: String,
+    },
+    /// Client is denied access.
+    PermissionDenied,
+    /// Method is expected to be called with 'more' set to true, but wasn't.
+    ExpectedMore,
+}
+
+impl core::error::Error for OwnedError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        None
+    }
+}
+
+impl core::fmt::Display for OwnedError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            OwnedError::InterfaceNotFound { interface } => {
+                write!(f, "Interface not found: {interface}")
+            }
+            OwnedError::MethodNotFound { method } => {
+                write!(f, "Method not found: {method}")
+            }
+            OwnedError::InvalidParameter { parameter } => {
+                write!(f, "Invalid parameter: {parameter}")
+            }
+            OwnedError::PermissionDenied => {
+                write!(f, "Permission denied")
+            }
+            OwnedError::ExpectedMore => {
+                write!(f, "Expected more")
+            }
+            OwnedError::MethodNotImplemented { method } => {
+                write!(f, "Method not implemented: {method}")
+            }
+        }
+    }
+}
+
+impl<'a> From<Error<'a>> for OwnedError {
+    fn from(err: Error<'a>) -> Self {
+        match err {
+            Error::InterfaceNotFound { interface } => OwnedError::InterfaceNotFound {
+                interface: interface.into_owned(),
+            },
+            Error::MethodNotFound { method } => OwnedError::MethodNotFound {
+                method: method.into_owned(),
+            },
+            Error::MethodNotImplemented { method } => OwnedError::MethodNotImplemented {
+                method: method.into_owned(),
+            },
+            Error::InvalidParameter { parameter } => OwnedError::InvalidParameter {
+                parameter: parameter.into_owned(),
+            },
+            Error::PermissionDenied => OwnedError::PermissionDenied,
+            Error::ExpectedMore => OwnedError::ExpectedMore,
         }
     }
 }

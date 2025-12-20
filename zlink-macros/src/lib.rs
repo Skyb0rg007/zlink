@@ -366,27 +366,29 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///
 /// #[proxy("org.example.MyService")]
 /// trait MyServiceProxy {
+///     // Non-streaming methods can use borrowed types.
 ///     async fn get_status(&mut self) -> zlink::Result<Result<Status<'_>, MyError<'_>>>;
 ///     async fn set_value(
 ///         &mut self,
 ///         key: &str,
 ///         value: i32,
 ///     ) -> zlink::Result<Result<(), MyError<'_>>>;
-///     // This will call the `io.systemd.Machine.List` method when `list_machines()` is invoked.
 ///     #[zlink(rename = "ListMachines")]
 ///     async fn list_machines(&mut self) -> zlink::Result<Result<Vec<Machine<'_>>, MyError<'_>>>;
-///     // Streaming version of get_status - calls the same method but returns a stream
+///     // Streaming methods must use owned types (DeserializeOwned) because the internal buffer may
+///     // be reused between stream iterations.
 ///     #[zlink(rename = "GetStatus", more)]
 ///     async fn stream_status(
 ///         &mut self,
 ///     ) -> zlink::Result<
-///         impl Stream<Item = zlink::Result<Result<Status<'_>, MyError<'_>>>>,
+///         impl Stream<Item = zlink::Result<Result<OwnedStatus, OwnedMyError>>>,
 ///     >;
 /// }
 ///
 /// // The macro generates:
 /// // impl<S: Socket> MyServiceProxy for Connection<S> { ... }
 ///
+/// // Borrowed types for non-streaming methods.
 /// #[derive(Debug, Serialize, Deserialize)]
 /// struct Status<'m> {
 ///     active: bool,
@@ -404,6 +406,22 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     InvalidRequest,
 ///     // Parameters must be named.
 ///     CodedError { code: u32, message: &'a str },
+/// }
+///
+/// // Owned types for streaming methods (required by the `more` attribute).
+/// #[derive(Debug, Serialize, Deserialize)]
+/// struct OwnedStatus {
+///     active: bool,
+///     message: String,
+/// }
+///
+/// #[prefix_all("org.example.MyService.")]
+/// #[derive(Debug, Serialize, Deserialize)]
+/// #[serde(tag = "error", content = "parameters")]
+/// enum OwnedMyError {
+///     NotFound,
+///     InvalidRequest,
+///     CodedError { code: u32, message: String },
 /// }
 ///
 /// // Example usage:
@@ -428,12 +446,18 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///
 /// ## Example: Chaining Method Calls
 ///
+/// Note: Chain methods require owned types (`DeserializeOwned`) for **reply** parameters and errors
+/// because the internal buffer may be reused between stream iterations. Input arguments can still
+/// use borrowed types. This limitation may be lifted in the future when Rust supports lending
+/// streams.
+///
 /// ```rust
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// # use zlink::proxy;
 /// # use serde::{Deserialize, Serialize};
 /// # use futures_util::{pin_mut, TryStreamExt};
 /// #
+/// // Borrowed reply types for single-call methods.
 /// # #[derive(Debug, Serialize, Deserialize)]
 /// # struct User<'a> { id: u64, name: &'a str }
 /// # #[derive(Debug, Serialize, Deserialize)]
@@ -448,6 +472,18 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// #     #[serde(borrow)]
 /// #     Posts(Vec<Post<'a>>)
 /// # }
+/// // Owned reply types for chain API.
+/// # #[derive(Debug, Serialize, Deserialize)]
+/// # struct OwnedUser { id: u64, name: String }
+/// # #[derive(Debug, Serialize, Deserialize)]
+/// # struct OwnedPost { id: u64, user_id: u64, content: String }
+/// # #[derive(Debug, Serialize, Deserialize)]
+/// # #[serde(untagged)]
+/// # enum OwnedBlogReply {
+/// #     User(OwnedUser),
+/// #     Post(OwnedPost),
+/// #     Posts(Vec<OwnedPost>)
+/// # }
 /// # #[derive(Debug, Serialize, Deserialize)]
 /// # #[serde(tag = "error")]
 /// # enum BlogError { NotFound, InvalidInput }
@@ -461,10 +497,12 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # }
 /// # impl std::error::Error for BlogError {}
 /// #
-/// // Define proxies for two different services
+/// // Define proxies for two different services.
+/// // Single-call methods use borrowed reply types.
 /// #[proxy("org.example.blog.Users")]
 /// trait UsersProxy {
-///     async fn get_user(&mut self, id: u64) -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
+///     async fn get_user(&mut self, id: u64)
+///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
 ///     async fn create_user(&mut self, name: &str)
 ///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
 /// }
@@ -486,26 +524,27 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # ];
 /// # let socket = MockSocket::with_responses(&responses);
 /// # let mut conn = zlink::Connection::new(socket);
-/// // Chain calls across both interfaces in a single batch
+/// // Chain calls use owned reply types (OwnedBlogReply, BlogError).
+/// // Input arguments can still be borrowed (&str).
 /// let chain = conn
-///     .chain_create_user::<BlogReply<'_>, BlogError>("Alice")? // Start with Users interface
-///     .create_post(1, "My first post!")?                       // Chain Posts interface
-///     .get_posts_by_user(1)?                                   // Get all posts
-///     .get_user(1)?;                                           // Get user details
+///     .chain_create_user::<OwnedBlogReply, BlogError>("Alice")?
+///     .create_post(1, "My first post!")?
+///     .get_posts_by_user(1)?
+///     .get_user(1)?;
 ///
-/// // Send all calls in a single batch
+/// // Send all calls in a single batch.
 /// let replies = chain.send().await?;
 /// pin_mut!(replies);
 ///
-/// // Process replies in order
+/// // Process replies in order.
 /// let mut reply_count = 0;
 /// while let Some((reply, _fds)) = replies.try_next().await? {
 ///     reply_count += 1;
 ///     if let Ok(response) = reply {
 ///         match response.parameters() {
-///             Some(BlogReply::User(user)) => assert_eq!(user.name, "Alice"),
-///             Some(BlogReply::Post(post)) => assert_eq!(post.content, "My first post!"),
-///             Some(BlogReply::Posts(posts)) => assert_eq!(posts.len(), 1),
+///             Some(OwnedBlogReply::User(user)) => assert_eq!(user.name, "Alice"),
+///             Some(OwnedBlogReply::Post(post)) => assert_eq!(post.content, "My first post!"),
+///             Some(OwnedBlogReply::Posts(posts)) => assert_eq!(posts.len(), 1),
 ///             None => {} // set_value returns empty response
 ///         }
 ///     }
@@ -518,12 +557,13 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// ## Combining with Standard Varlink Service
 ///
 /// When the `idl-parse` feature is enabled, you can also chain calls between your custom
-/// interfaces and the standard Varlink service interface for introspection:
+/// interfaces and the standard Varlink service interface for introspection. Remember that
+/// chain methods require owned types (`DeserializeOwned`) for **replies**.
 ///
 /// ```rust
 /// # #[cfg(feature = "idl-parse")] {
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// # use zlink::{proxy, varlink_service};
+/// # use zlink::{proxy, varlink_service, ReplyError};
 /// # use serde::{Deserialize, Serialize};
 /// #
 /// # #[derive(Debug, Serialize, Deserialize)]
@@ -537,20 +577,34 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     async fn get_status(&mut self) -> zlink::Result<Result<Status, MyError>>;
 /// }
 ///
-/// // Combined types for cross-interface chaining
+/// // Owned reply types for cross-interface chaining (required by chain API).
 /// #[derive(Debug, Deserialize)]
-/// #[serde(untagged)]
-/// enum CombinedReply<'a> {
-///     #[serde(borrow)]
-///     VarlinkService(varlink_service::Reply<'a>),
-///     MyService(Status),
+/// struct OwnedInfo {
+///     vendor: String,
+///     product: String,
+///     version: String,
+///     url: String,
+///     interfaces: Vec<String>,
+/// }
+///
+/// #[derive(Debug, Deserialize)]
+/// struct OwnedInterfaceDescription {
+///     description: String,
 /// }
 ///
 /// #[derive(Debug, Deserialize)]
 /// #[serde(untagged)]
-/// enum CombinedError<'a> {
-///     #[serde(borrow)]
-///     VarlinkService(varlink_service::Error<'a>),
+/// enum OwnedCombinedReply {
+///     Info(OwnedInfo),
+///     InterfaceDescription(OwnedInterfaceDescription),
+///     MyService(Status),
+/// }
+///
+/// // For deserialization, we can use #[serde(untagged)] to combine error types.
+/// #[derive(Debug, Deserialize)]
+/// #[serde(untagged)]
+/// enum OwnedCombinedError {
+///     InterfaceNotFound { interface: String },
 ///     MyService(MyError),
 /// }
 ///
@@ -570,11 +624,11 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// use varlink_service::Proxy;
 /// use zlink::varlink_service::Chain;
 ///
-/// // Get service info and custom status in one batch
+/// // Get service info and custom status in one batch using owned reply types.
 /// let chain = conn
-///     .chain_get_info::<CombinedReply<'_>, CombinedError<'_>>()? // Varlink service interface
-///     .get_status()?                                         // MyService interface
-///     .get_interface_description("com.example.MyService")?;  // Back to Varlink service
+///     .chain_get_info::<OwnedCombinedReply, OwnedCombinedError>()? // Varlink service interface
+///     .get_status()?                                               // MyService interface
+///     .get_interface_description("com.example.MyService")?;        // Back to Varlink service
 ///
 /// let replies = chain.send().await?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())

@@ -187,11 +187,12 @@ fn parse_method_arguments<'a>(
 fn build_chain_where_clause(method_where_clause: &Option<syn::WhereClause>) -> syn::WhereClause {
     let mut chain_where_predicates = syn::punctuated::Punctuated::new();
 
-    // Add ReplyParams and ReplyError bounds
+    // Add ReplyParams and ReplyError bounds.
+    // DeserializeOwned is required because stream items must be owned (cannot borrow from buffer).
     chain_where_predicates
-        .push(syn::parse_quote!(ReplyParams: ::serde::Deserialize<'c> + ::core::fmt::Debug));
+        .push(syn::parse_quote!(ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug));
     chain_where_predicates
-        .push(syn::parse_quote!(ReplyError: ::serde::Deserialize<'c> + ::core::fmt::Debug));
+        .push(syn::parse_quote!(ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug));
 
     // Add method where clause predicates if present
     if let Some(method_where) = method_where_clause {

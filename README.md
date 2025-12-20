@@ -305,6 +305,11 @@ adds variants for each method named `chain_<method_name>` and a trait named `<Tr
 allow you to batch multiple requests and send them out at once without waiting for individual
 responses:
 
+> **Note**: Chain methods require owned types (`DeserializeOwned`) for **reply** parameters and
+> errors because the internal buffer may be reused between stream iterations. Input arguments can
+> still use borrowed types. This limitation may be lifted in the future when Rust supports lending
+> streams.
+
 ```rust,no_run
 use futures_util::{StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
@@ -315,9 +320,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to a batch processing service
     let mut conn = unix::connect("/tmp/batch_processor.varlink").await?;
 
-    // Send multiple pipelined requests without waiting for responses
+    // Send multiple pipelined requests without waiting for responses.
+    // Chain API requires owned types for replies (OwnedProcessReply, OwnedProcessError).
+    // Input arguments can still be borrowed (&str, ProcessRequest<'_>).
     let replies = conn
-        .chain_process::<ProcessReply, ProcessError>(1, "first")?
+        .chain_process::<OwnedProcessReply, OwnedProcessError>(1, "first")?
         .process(2, "second")?
         .process(3, "third")?
         .batch_process(vec![
@@ -334,10 +341,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (reply, _fds) = reply?;
         if let Ok(response) = reply {
             match response.into_parameters() {
-                Some(ProcessReply::Result(result)) => {
+                Some(OwnedProcessReply::Result(result)) => {
                     results.push(result);
                 }
-                Some(ProcessReply::BatchResult(batch)) => {
+                Some(OwnedProcessReply::BatchResult(batch)) => {
                     results.extend(batch.results);
                 }
                 None => {}
@@ -355,18 +362,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[proxy("org.example.BatchProcessor")]
 trait BatchProcessorProxy {
+    // Non-chain methods can use borrowed types for replies.
     async fn process(
         &mut self,
         id: u32,
         data: &str,
-    ) -> zlink::Result<Result<ProcessReply<'_>, ProcessError>>;
+    ) -> zlink::Result<Result<ProcessReply<'_>, ProcessError<'_>>>;
 
     async fn batch_process(
         &mut self,
         requests: Vec<ProcessRequest<'_>>,
-    ) -> zlink::Result<Result<ProcessReply<'_>, ProcessError>>;
+    ) -> zlink::Result<Result<ProcessReply<'_>, ProcessError<'_>>>;
 }
 
+// Input types can use borrowed data (they implement Serialize).
 #[derive(Debug, Serialize)]
 struct ProcessRequest<'a> {
     id: u32,
@@ -374,6 +383,7 @@ struct ProcessRequest<'a> {
     data: &'a str,
 }
 
+// Borrowed reply types for non-chain (single call) methods.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum ProcessReply<'a> {
@@ -398,8 +408,33 @@ struct BatchResult<'a> {
 
 #[derive(Debug, ReplyError)]
 #[zlink(interface = "org.example.BatchProcessor")]
-enum ProcessError {
-    InvalidRequest,
+enum ProcessError<'a> {
+    InvalidRequest { message: &'a str },
+}
+
+// Owned reply types for chain API (which requires DeserializeOwned).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum OwnedProcessReply {
+    Result(OwnedProcessResult),
+    BatchResult(OwnedBatchResult),
+}
+
+#[derive(Debug, Deserialize)]
+struct OwnedProcessResult {
+    id: u32,
+    processed: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OwnedBatchResult {
+    results: Vec<OwnedProcessResult>,
+}
+
+#[derive(Debug, ReplyError)]
+#[zlink(interface = "org.example.BatchProcessor")]
+enum OwnedProcessError {
+    InvalidRequest { message: String },
 }
 ```
 

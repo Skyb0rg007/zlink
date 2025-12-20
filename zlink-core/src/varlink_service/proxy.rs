@@ -18,66 +18,74 @@ use super::{Error, Info, InterfaceDescription};
 /// chain calls together for efficient batching. Use [`crate::Connection::chain_get_info`] or
 /// [`crate::Connection::chain_get_interface_description`] to start a chain.
 ///
+/// ## Owned Data Requirement for Chains
+///
+/// Chain methods require owned types (`DeserializeOwned`) for reply parameters and errors
+/// because the internal buffer may be reused between stream iterations. This limitation may be
+/// lifted in the future when Rust supports lending streams.
+///
+/// [`super::OwnedReply`], [`super::OwnedInfo`], and [`super::OwnedError`] are provided for use
+/// with the chain API.
+///
 /// ## Example
 ///
 /// ```no_run
-/// use zlink_core::{Connection, varlink_service::{Proxy, Chain, Reply, Error}};
-/// use serde::Deserialize;
+/// use zlink_core::{
+///     Connection,
+///     varlink_service::{Chain, OwnedError, OwnedInfo, OwnedReply, Proxy},
+/// };
 /// use futures_util::{pin_mut, stream::StreamExt};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
-/// // For a single interface, use the provided Reply enum directly
+/// // Chain API uses owned types (DeserializeOwned) provided by varlink_service module.
 /// let chain = conn
-///     .chain_get_info::<Reply<'_>, Error<'_>>()?
+///     .chain_get_info::<OwnedReply, OwnedError>()?
 ///     .get_interface_description("org.example.interface")?
 ///     .get_info()?;
 ///
-/// // Send the chain and process replies
+/// // Send the chain and process replies.
 /// let replies = chain.send().await?;
 /// pin_mut!(replies);
 ///
-/// // Process each reply in the order they were chained
+/// // Process each reply in the order they were chained.
 /// while let Some(result) = replies.next().await {
 ///     let (reply, _fds) = result?;
-///     match reply?.parameters().unwrap() {
-///         Reply::Info(info) => {
+///     match reply.unwrap().parameters().unwrap() {
+///         OwnedReply::Info(info) => {
 ///             println!("Service: {} v{} by {}", info.product, info.version, info.vendor);
 ///             println!("URL: {}", info.url);
 ///             println!("Interfaces: {:?}", info.interfaces);
 ///         }
-///         Reply::InterfaceDescription(desc) => {
-///             println!("Interface description: {}", desc.as_raw().unwrap_or("<parsed>"));
-///             // Parse the interface if needed
-///             if let Ok(interface) = desc.parse() {
-///                 println!("Interface name: {}", interface.name());
-///             }
+///         OwnedReply::InterfaceDescription(desc) => {
+///             // Use as_raw() to get the raw description string.
+///             println!("Interface description: {}", desc.as_raw().unwrap());
 ///         }
 ///     }
 /// }
 ///
 /// // For combining multiple interfaces, create a combined reply enum:
+/// use serde::Deserialize;
+///
 /// #[derive(Debug, Deserialize)]
 /// #[serde(untagged)]
-/// enum CombinedReply<'a> {
-///     #[serde(borrow)]
-///     VarlinkService(Reply<'a>),
+/// enum CombinedReply {
+///     VarlinkService(OwnedReply),
 ///     // Add other interface reply types here
-///     // OtherInterface(other_interface::Reply<'a>),
+///     // OtherInterface(other_interface::OwnedReply),
 /// }
 ///
-/// #[derive(Debug, Deserialize)]
-/// #[serde(untagged)]
-/// enum CombinedError<'a> {
-///     #[serde(borrow)]
-///     VarlinkService(Error<'a>),
+/// #[derive(Debug, zlink_core::ReplyError)]
+/// #[zlink(interface = "org.varlink.service")]
+/// enum CombinedError {
+///     // Varlink service errors
+///     InterfaceNotFound { interface: String },
 ///     // Add other interface error types here
-///     // OtherInterface(other_interface::Error<'a>),
 /// }
 ///
-/// // Then use the combined types for cross-interface chaining
+/// // Then use the combined types for cross-interface chaining.
 /// let combined_chain = conn
-///     .chain_get_info::<CombinedReply<'_>, CombinedError<'_>>()?;
+///     .chain_get_info::<CombinedReply, CombinedError>()?;
 ///     // .other_interface_method()?;  // Chain calls from other interfaces
 ///
 /// let combined_replies = combined_chain.send().await?;
@@ -89,16 +97,18 @@ use super::{Error, Info, InterfaceDescription};
 ///         Ok(reply) => {
 ///             match reply.parameters().unwrap() {
 ///                 CombinedReply::VarlinkService(varlink_reply) => match varlink_reply {
-///                     Reply::Info(info) => println!("Varlink service info: {:?}", info),
-///                     Reply::InterfaceDescription(desc) => println!("Varlink interface: {:?}", desc),
+///                     OwnedReply::Info(info) => println!("Varlink service info: {:?}", info),
+///                     OwnedReply::InterfaceDescription(desc) => {
+///                         println!("Varlink interface: {:?}", desc)
+///                     }
 ///                 }
 ///                 // Handle other interface replies here
 ///             }
 ///         }
 ///         Err(error) => {
 ///             match error {
-///                 CombinedError::VarlinkService(varlink_error) => {
-///                     println!("Varlink service error: {:?}", varlink_error);
+///                 CombinedError::InterfaceNotFound { interface } => {
+///                     println!("Interface not found: {}", interface);
 ///                 }
 ///                 // Handle other interface errors here
 ///             }
@@ -145,11 +155,16 @@ pub trait Proxy {
 mod tests {
     use super::*;
     // Use consolidated mock socket from test_utils.
-    use crate::{test_utils::mock_socket::MockSocket, Connection};
+    use crate::{
+        test_utils::mock_socket::MockSocket,
+        varlink_service::{OwnedError, OwnedReply},
+        Connection,
+    };
 
     #[tokio::test]
-    async fn test_chain_api_creation() -> crate::Result<()> {
-        // Test that we can create chains with the new API
+    async fn chain_api_creation() -> crate::Result<()> {
+        // Test that we can create chains with the new API.
+        // Note: Chains require DeserializeOwned types, so we use owned types here.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -157,20 +172,18 @@ mod tests {
         let socket = MockSocket::with_responses(&responses);
         let mut conn = Connection::new(socket);
 
-        // Use the provided Reply enum from the varlink service module
-        use super::{super::Reply, Error};
-
-        // Test that we can create the chain APIs.
-        let _chain1 = conn.chain_get_info::<Reply<'_>, Error<'_>>()?;
+        // Test that we can create the chain APIs with owned types.
+        let _chain1 = conn.chain_get_info::<OwnedReply, OwnedError>()?;
         let _chain2 =
-            conn.chain_get_interface_description::<Reply<'_>, Error<'_>>("org.varlink.service")?;
+            conn.chain_get_interface_description::<OwnedReply, OwnedError>("org.varlink.service")?;
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_chain_extension_methods() -> crate::Result<()> {
-        // Test that we can use chain extension methods
+    async fn chain_extension_methods() -> crate::Result<()> {
+        // Test that we can use chain extension methods.
+        // Note: Chains require DeserializeOwned types, so we use owned types here.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -179,11 +192,9 @@ mod tests {
         let socket = MockSocket::with_responses(&responses);
         let mut conn = Connection::new(socket);
 
-        use super::{super::Reply, Error};
-
         // Test that we can chain calls using extension methods and actually read replies.
         let chained = conn
-            .chain_get_info::<Reply<'_>, Error<'_>>()?
+            .chain_get_info::<OwnedReply, OwnedError>()?
             .get_interface_description("org.varlink.service")?
             .get_info()?;
 
@@ -191,11 +202,11 @@ mod tests {
         use futures_util::{pin_mut, stream::StreamExt};
         pin_mut!(replies);
 
-        // Read first reply (GetInfo)
+        // Read first reply (GetInfo).
         let (first_reply, _fds) = replies.next().await.unwrap()?;
         let first_reply = first_reply.unwrap();
         match first_reply.parameters().unwrap() {
-            Reply::Info(info) => {
+            OwnedReply::Info(info) => {
                 assert_eq!(info.vendor, "Test");
                 assert_eq!(info.product, "TestProduct");
                 assert_eq!(info.version, "1.0");
@@ -205,27 +216,27 @@ mod tests {
             _ => panic!("Expected Info reply"),
         }
 
-        // Read second reply (GetInterfaceDescription)
+        // Read second reply (GetInterfaceDescription).
         let (second_reply, _fds) = replies.next().await.unwrap()?;
         let second_reply = second_reply.unwrap();
         match second_reply.parameters().unwrap() {
-            Reply::InterfaceDescription(desc) => {
+            OwnedReply::InterfaceDescription(desc) => {
                 assert_eq!(desc.as_raw().unwrap(), "interface org.varlink.service {}");
             }
             _ => panic!("Expected InterfaceDescription reply"),
         }
 
-        // Read third reply (GetInfo again)
+        // Read third reply (GetInfo again).
         let (third_reply, _fds) = replies.next().await.unwrap()?;
         let third_reply = third_reply.unwrap();
         match third_reply.parameters().unwrap() {
-            Reply::Info(info) => {
+            OwnedReply::Info(info) => {
                 assert_eq!(info.vendor, "Test");
             }
             _ => panic!("Expected Info reply"),
         }
 
-        // No more replies
+        // No more replies.
         assert!(replies.next().await.is_none());
 
         Ok(())

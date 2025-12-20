@@ -4,9 +4,9 @@
 //! implementations of the standard Varlink service interface.
 
 mod info;
-pub use info::Info;
+pub use info::{Info, OwnedInfo};
 mod api;
-pub use api::{Error, Method, Reply, Result};
+pub use api::{Error, Method, OwnedError, OwnedReply, Reply, Result};
 
 #[cfg(all(feature = "idl-parse", feature = "std"))]
 mod proxy;
@@ -42,7 +42,7 @@ pub const DESCRIPTION: &crate::idl::Interface<'static> = &{
         &Method::new(
             "GetInterfaceDescription",
             &[INTERFACE_PARAM],
-            &InterfaceDescription::TYPE
+            InterfaceDescription::TYPE
                 .as_object()
                 .unwrap()
                 .as_borrowed()
