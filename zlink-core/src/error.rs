@@ -26,6 +26,8 @@ pub enum Error {
     MissingParameters,
     /// A general service error.
     VarlinkService(crate::varlink_service::Error<'static>),
+    /// Empty chain creation attempt.
+    EmptyChain,
 }
 
 /// The Result type for the zlink crate.
@@ -74,6 +76,7 @@ impl core::fmt::Display for Error {
             Error::IdlParse(e) => write!(f, "IDL parse error: {e}"),
             Error::MissingParameters => write!(f, "Missing required parameters"),
             Error::VarlinkService(e) => write!(f, "{e}"),
+            Error::EmptyChain => write!(f, "Cannot create a chain from an empty iterator or slice"),
         }
     }
 }
@@ -100,6 +103,9 @@ impl defmt::Format for Error {
             Error::IdlParse(_) => defmt::write!(fmt, "IDL parse error"),
             Error::MissingParameters => defmt::write!(fmt, "Missing required parameters"),
             Error::VarlinkService(_) => defmt::write!(fmt, "Varlink service error"),
+            Error::EmptyChain => {
+                defmt::write!(fmt, "Cannot create a chain from an empty iterator or slice")
+            }
         }
     }
 }
