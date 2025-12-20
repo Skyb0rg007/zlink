@@ -133,9 +133,9 @@ fn client_sending(c: &mut Criterion) {
                 #[derive(Debug, Deserialize)]
                 struct DummyError;
                 #[cfg(feature = "std")]
-                let chain_result = conn.chain_call::<_, PingReply, DummyError>(&call, vec![]);
+                let chain_result = conn.chain_call(&call, vec![]);
                 #[cfg(not(feature = "std"))]
-                let chain_result = conn.chain_call::<_, PingReply, DummyError>(&call);
+                let chain_result = conn.chain_call(&call);
 
                 let mut chain = chain_result.unwrap();
 
@@ -150,7 +150,7 @@ fn client_sending(c: &mut Criterion) {
                 }
 
                 // Send all at once and collect replies.
-                let replies = chain.send().await.unwrap();
+                let replies = chain.send::<PingReply, DummyError>().await.unwrap();
                 pin_mut!(replies);
 
                 let mut count = 0;

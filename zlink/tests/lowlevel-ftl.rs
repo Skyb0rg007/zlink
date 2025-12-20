@@ -111,10 +111,10 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
 
         // Ask for the drive condition, then set them and then ask again.
         let replies = conn
-            .chain_get_drive_condition::<FtlReply, FtlError>()?
+            .chain_get_drive_condition()?
             .set_drive_condition(conditions[1])?
             .get_drive_condition()?
-            .send()
+            .send::<FtlReply, FtlError>()
             .await?;
 
         // Now we should be able to get all the replies.
@@ -155,7 +155,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
         let replies = conn
             // Let's try to jump to a new coordinate but first requiring more tylium
             // than we have.
-            .chain_jump::<FtlReply, FtlError>(DriveConfiguration {
+            .chain_jump(DriveConfiguration {
                 speed: impossible_speed,
                 trajectory: 1,
                 duration,
@@ -166,7 +166,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
                 trajectory: 1,
                 duration,
             })?
-            .send()
+            .send::<FtlReply, FtlError>()
             .await?;
         pin_mut!(replies);
         let (result, _fds) = replies.try_next().await?.unwrap();

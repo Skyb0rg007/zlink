@@ -34,11 +34,11 @@ async fn chain_replies_with_fds() {
     let call2 = Call::new(GetUser { id: 2 });
 
     let replies = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
         .append(&call2, vec![])
         .unwrap()
-        .send()
+        .send::<User, ApiError>()
         .await
         .unwrap();
 
@@ -69,11 +69,11 @@ async fn chain_replies_with_no_fds() {
     let call2 = Call::new(GetUser { id: 2 });
 
     let replies = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
         .append(&call2, vec![])
         .unwrap()
-        .send()
+        .send::<User, ApiError>()
         .await
         .unwrap();
 
@@ -115,12 +115,12 @@ async fn chain_send_with_fds() {
 
     // Send FDs with the calls.
     let chain = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![r1.into()])
+        .chain_call::<GetUser>(&call1, vec![r1.into()])
         .unwrap()
         .append(&call2, vec![r2.into()])
         .unwrap();
 
-    let replies = chain.send().await.unwrap();
+    let replies = chain.send::<User, ApiError>().await.unwrap();
 
     // Collect replies first to release the borrow on conn.
     let reply_results: Vec<_> = {
@@ -166,11 +166,11 @@ async fn chain_oneway_call_with_fds() {
     let oneway_call = Call::new(GetUser { id: 2 }).set_oneway(true);
 
     let replies = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
         .append(&oneway_call, vec![])
         .unwrap()
-        .send()
+        .send::<User, ApiError>()
         .await
         .unwrap();
 
@@ -206,9 +206,9 @@ async fn chain_error_reply_with_fds() {
     let call1 = Call::new(GetUser { id: 1 });
 
     let replies = conn
-        .chain_call::<GetUser, User, TestError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
-        .send()
+        .send::<User, TestError>()
         .await
         .unwrap();
 
@@ -246,13 +246,13 @@ async fn chain_receive_fds_from_server() {
     let call3 = Call::new(GetUser { id: 3 });
 
     let replies = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
         .append(&call2, vec![])
         .unwrap()
         .append(&call3, vec![])
         .unwrap()
-        .send()
+        .send::<User, ApiError>()
         .await
         .unwrap();
 
@@ -312,7 +312,7 @@ async fn chain_fds_sent_only_with_their_message() {
 
     // Build chain: call1 (no FDs), call2 (with FD), call3 (no FDs).
     let chain = conn
-        .chain_call::<GetUser, User, ApiError>(&call1, vec![])
+        .chain_call::<GetUser>(&call1, vec![])
         .unwrap()
         .append(&call2, vec![r_fd.into()])
         .unwrap()

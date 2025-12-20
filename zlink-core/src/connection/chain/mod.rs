@@ -11,9 +11,8 @@ use serde::{de::DeserializeOwned, Serialize};
 
 /// A chain of method calls that will be sent together.
 ///
-/// Each call must have the same method, reply, and error types for homogeneity. Use
-/// [`Connection::chain_call`] to create a new chain, extend it with [`Chain::append`] and send the
-/// the entire chain using [`Chain::send`].
+/// Use [`Connection::chain_call`] to create a new chain, extend it with [`Chain::append`] and send
+/// the entire chain using [`Chain::send`] or [`Chain::send_ignore_replies`].
 ///
 /// With `std` feature enabled, this supports unlimited calls. Otherwise it is limited by how many
 /// calls can fit in our fixed-sized buffer.
@@ -21,18 +20,15 @@ use serde::{de::DeserializeOwned, Serialize};
 /// Oneway calls (where `Call::oneway() == Some(true)`) do not expect replies and are handled
 /// automatically by the chain.
 #[derive(Debug)]
-pub struct Chain<'c, S: Socket, ReplyParams, ReplyError> {
+pub struct Chain<'c, S: Socket> {
     pub(super) connection: &'c mut Connection<S>,
     pub(super) call_count: usize,
     pub(super) reply_count: usize,
-    _phantom: core::marker::PhantomData<(ReplyParams, ReplyError)>,
 }
 
-impl<'c, S, ReplyParams, ReplyError> Chain<'c, S, ReplyParams, ReplyError>
+impl<'c, S> Chain<'c, S>
 where
     S: Socket,
-    ReplyParams: DeserializeOwned + Debug,
-    ReplyError: DeserializeOwned + Debug,
 {
     /// Create a new chain with the first call.
     pub(super) fn new<Method>(
@@ -53,7 +49,6 @@ where
             connection,
             call_count: 1,
             reply_count,
-            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -92,12 +87,12 @@ where
     /// that allows reading the replies.
     ///
     /// In std mode, each reply includes any file descriptors received.
-    pub async fn send(
+    pub async fn send<ReplyParams, ReplyError>(
         self,
     ) -> Result<impl Stream<Item = Result<reply_stream::ChainResult<ReplyParams, ReplyError>>> + 'c>
     where
-        ReplyParams: 'c,
-        ReplyError: 'c,
+        ReplyParams: DeserializeOwned + Debug + 'c,
+        ReplyError: DeserializeOwned + Debug + 'c,
     {
         // Flush all enqueued calls.
         self.connection.write.flush().await?;
@@ -107,6 +102,26 @@ where
             |conn| async { conn.receive_reply::<ReplyParams, ReplyError>().await },
             self.reply_count,
         ))
+    }
+
+    /// Send all enqueued calls and ignore the replies.
+    ///
+    /// This will flush all enqueued calls in a single write operation and then read and discard
+    /// all replies. Use this when you don't need to process the responses.
+    ///
+    /// Note: Any file descriptors received with replies will also be discarded.
+    pub async fn send_ignore_replies(self) -> Result<()> {
+        use futures_util::StreamExt;
+        use serde::de::IgnoredAny;
+
+        let replies = self.send::<IgnoredAny, IgnoredAny>().await?;
+        futures_util::pin_mut!(replies);
+
+        while let Some(result) = replies.next().await {
+            let _ = result?;
+        }
+
+        Ok(())
     }
 }
 
@@ -146,15 +161,15 @@ mod tests {
 
         #[cfg(feature = "std")]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&call1, vec![])?
+            .chain_call::<GetUser>(&call1, vec![])?
             .append(&call2, vec![])?
-            .send()
+            .send::<User, ApiError>()
             .await?;
         #[cfg(not(feature = "std"))]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&call1)?
+            .chain_call::<GetUser>(&call1)?
             .append(&call2)?
-            .send()
+            .send::<User, ApiError>()
             .await?;
 
         use futures_util::stream::StreamExt;
@@ -197,15 +212,15 @@ mod tests {
 
         #[cfg(feature = "std")]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&get_user, vec![])?
+            .chain_call::<GetUser>(&get_user, vec![])?
             .append(&oneway_call, vec![])?
-            .send()
+            .send::<User, ApiError>()
             .await?;
         #[cfg(not(feature = "std"))]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&get_user)?
+            .chain_call::<GetUser>(&get_user)?
             .append(&oneway_call)?
-            .send()
+            .send::<User, ApiError>()
             .await?;
 
         use futures_util::stream::StreamExt;
@@ -245,15 +260,15 @@ mod tests {
 
         #[cfg(feature = "std")]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&more_call, vec![])?
+            .chain_call::<GetUser>(&more_call, vec![])?
             .append(&regular_call, vec![])?
-            .send()
+            .send::<User, ApiError>()
             .await?;
         #[cfg(not(feature = "std"))]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&more_call)?
+            .chain_call::<GetUser>(&more_call)?
             .append(&regular_call)?
-            .send()
+            .send::<User, ApiError>()
             .await?;
 
         use futures_util::stream::StreamExt;
@@ -327,17 +342,17 @@ mod tests {
 
         #[cfg(feature = "std")]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&call1, vec![])?
+            .chain_call::<GetUser>(&call1, vec![])?
             .append(&call2, vec![])?
             .append(&call3, vec![])?
-            .send()
+            .send::<User, ApiError>()
             .await?;
         #[cfg(not(feature = "std"))]
         let replies = conn
-            .chain_call::<GetUser, User, ApiError>(&call1)?
+            .chain_call::<GetUser>(&call1)?
             .append(&call2)?
             .append(&call3)?
-            .send()
+            .send::<User, ApiError>()
             .await?;
 
         // Use Stream's collect method to gather all results
@@ -423,22 +438,17 @@ mod tests {
 
         #[cfg(feature = "std")]
         let replies = conn
-            .chain_call::<HeterogeneousMethods, HeterogeneousResponses, HeterogeneousErrors>(
-                &get_user_call,
-                vec![],
-            )?
+            .chain_call::<HeterogeneousMethods>(&get_user_call, vec![])?
             .append(&get_post_call, vec![])?
             .append(&delete_user_call, vec![])?
-            .send()
+            .send::<HeterogeneousResponses, HeterogeneousErrors>()
             .await?;
         #[cfg(not(feature = "std"))]
         let replies = conn
-            .chain_call::<HeterogeneousMethods, HeterogeneousResponses, HeterogeneousErrors>(
-                &get_user_call,
-            )?
+            .chain_call::<HeterogeneousMethods>(&get_user_call)?
             .append(&get_post_call)?
             .append(&delete_user_call)?
-            .send()
+            .send::<HeterogeneousResponses, HeterogeneousErrors>()
             .await?;
 
         use futures_util::stream::StreamExt;
@@ -525,8 +535,8 @@ mod tests {
         let mut conn = Connection::new(socket);
 
         let replies = conn
-            .chain_from_iter::<GetUser, User, ApiError, _, _>((1..=3).map(|id| GetUser { id }))?
-            .send()
+            .chain_from_iter::<GetUser, _, _>((1..=3).map(|id| GetUser { id }))?
+            .send::<User, ApiError>()
             .await?;
 
         pin_mut!(replies);
@@ -559,8 +569,8 @@ mod tests {
         let calls = vec![Call::new(GetUser { id: 1 }), Call::new(GetUser { id: 2 })];
 
         let replies = conn
-            .chain_from_iter::<GetUser, User, ApiError, _, _>(calls)?
-            .send()
+            .chain_from_iter::<GetUser, _, _>(calls)?
+            .send::<User, ApiError>()
             .await?;
 
         pin_mut!(replies);
@@ -577,7 +587,7 @@ mod tests {
 
         let methods: Vec<GetUser> = vec![];
 
-        let result = conn.chain_from_iter::<GetUser, User, ApiError, _, _>(methods);
+        let result = conn.chain_from_iter::<GetUser, _, _>(methods);
 
         assert!(matches!(result, Err(crate::Error::EmptyChain)));
         Ok(())
@@ -643,8 +653,8 @@ mod tests {
         ];
 
         let replies = conn
-            .chain_from_iter_with_fds::<GetUser, User, ApiError, _, _>(calls_with_fds)?
-            .send()
+            .chain_from_iter_with_fds::<GetUser, _, _>(calls_with_fds)?
+            .send::<User, ApiError>()
             .await?;
 
         // Collect replies to release borrow on conn.
@@ -672,6 +682,29 @@ mod tests {
         assert_eq!(reply1.as_ref().unwrap().parameters().unwrap().id, 1);
         let (reply2, _) = reply_results[1].as_ref().unwrap();
         assert_eq!(reply2.as_ref().unwrap().parameters().unwrap().id, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ignore_replies() -> crate::Result<()> {
+        let responses = [r#"{"parameters":{"id":1}}"#, r#"{"parameters":{"id":2}}"#];
+        let socket = MockSocket::with_responses(&responses);
+        let mut conn = Connection::new(socket);
+
+        let call1 = Call::new(GetUser { id: 1 });
+        let call2 = Call::new(GetUser { id: 2 });
+
+        #[cfg(feature = "std")]
+        conn.chain_call::<GetUser>(&call1, vec![])?
+            .append(&call2, vec![])?
+            .send_ignore_replies()
+            .await?;
+        #[cfg(not(feature = "std"))]
+        conn.chain_call::<GetUser>(&call1)?
+            .append(&call2)?
+            .send_ignore_replies()
+            .await?;
 
         Ok(())
     }

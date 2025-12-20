@@ -57,11 +57,11 @@ pub(super) fn generate_chain_method(
         quote! {}
     };
 
-    // Combine method generics with our chain-specific generics
+    // Combine method generics with our chain-specific generics.
     let all_generics = if !method_generic_params.is_empty() {
-        quote! { 'c, #lifetime_bound #method_generic_params, ReplyParams, ReplyError }
+        quote! { 'c, #lifetime_bound #method_generic_params }
     } else {
-        quote! { 'c, #lifetime_bound ReplyParams, ReplyError }
+        quote! { 'c, #lifetime_bound }
     };
 
     let args_with_types: Vec<_> = arg_infos
@@ -73,7 +73,7 @@ pub(super) fn generate_chain_method(
         })
         .collect();
 
-    // Build complete where clause for chain method
+    // Build where clause for chain method (without reply type bounds)
     let chain_where = build_chain_where_clause(&method_where_clause);
 
     // Generate the trait method signature (declaration only)
@@ -83,7 +83,7 @@ pub(super) fn generate_chain_method(
             &'c mut self,
             #(#args_with_types),*
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, Self::Socket, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, Self::Socket>
         >
         #chain_where;
     };
@@ -123,7 +123,7 @@ pub(super) fn generate_chain_method(
             &'c mut self,
             #(#args_with_types),*
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, Self::Socket, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, Self::Socket>
         >
         #chain_where
         {
@@ -184,26 +184,12 @@ fn parse_method_arguments<'a>(
         .collect()
 }
 
-fn build_chain_where_clause(method_where_clause: &Option<syn::WhereClause>) -> syn::WhereClause {
-    let mut chain_where_predicates = syn::punctuated::Punctuated::new();
-
-    // Add ReplyParams and ReplyError bounds.
-    // DeserializeOwned is required because stream items must be owned (cannot borrow from buffer).
-    chain_where_predicates
-        .push(syn::parse_quote!(ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug));
-    chain_where_predicates
-        .push(syn::parse_quote!(ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug));
-
-    // Add method where clause predicates if present
+fn build_chain_where_clause(method_where_clause: &Option<syn::WhereClause>) -> TokenStream {
+    // Only include method where clause predicates if present
     if let Some(method_where) = method_where_clause {
-        for predicate in &method_where.predicates {
-            chain_where_predicates.push(predicate.clone());
-        }
-    }
-
-    syn::WhereClause {
-        where_token: syn::token::Where::default(),
-        predicates: chain_where_predicates,
+        quote! { #method_where }
+    } else {
+        quote! {}
     }
 }
 
