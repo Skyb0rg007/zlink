@@ -12,7 +12,7 @@ use serde::{de::DeserializeOwned, Serialize};
 /// A chain of method calls that will be sent together.
 ///
 /// Use [`Connection::chain_call`] to create a new chain, extend it with [`Chain::append`] and send
-/// the entire chain using [`Chain::send`].
+/// the entire chain using [`Chain::send`] or [`Chain::send_ignore_replies`].
 ///
 /// With `std` feature enabled, this supports unlimited calls. Otherwise it is limited by how many
 /// calls can fit in our fixed-sized buffer.
@@ -102,6 +102,26 @@ where
             |conn| async { conn.receive_reply::<ReplyParams, ReplyError>().await },
             self.reply_count,
         ))
+    }
+
+    /// Send all enqueued calls and ignore the replies.
+    ///
+    /// This will flush all enqueued calls in a single write operation and then read and discard
+    /// all replies. Use this when you don't need to process the responses.
+    ///
+    /// Note: Any file descriptors received with replies will also be discarded.
+    pub async fn send_ignore_replies(self) -> Result<()> {
+        use futures_util::StreamExt;
+        use serde::de::IgnoredAny;
+
+        let replies = self.send::<IgnoredAny, IgnoredAny>().await?;
+        futures_util::pin_mut!(replies);
+
+        while let Some(result) = replies.next().await {
+            let _ = result?;
+        }
+
+        Ok(())
     }
 }
 
@@ -662,6 +682,29 @@ mod tests {
         assert_eq!(reply1.as_ref().unwrap().parameters().unwrap().id, 1);
         let (reply2, _) = reply_results[1].as_ref().unwrap();
         assert_eq!(reply2.as_ref().unwrap().parameters().unwrap().id, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ignore_replies() -> crate::Result<()> {
+        let responses = [r#"{"parameters":{"id":1}}"#, r#"{"parameters":{"id":2}}"#];
+        let socket = MockSocket::with_responses(&responses);
+        let mut conn = Connection::new(socket);
+
+        let call1 = Call::new(GetUser { id: 1 });
+        let call2 = Call::new(GetUser { id: 2 });
+
+        #[cfg(feature = "std")]
+        conn.chain_call::<GetUser>(&call1, vec![])?
+            .append(&call2, vec![])?
+            .send_ignore_replies()
+            .await?;
+        #[cfg(not(feature = "std"))]
+        conn.chain_call::<GetUser>(&call1)?
+            .append(&call2)?
+            .send_ignore_replies()
+            .await?;
 
         Ok(())
     }
