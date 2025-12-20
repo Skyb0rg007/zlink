@@ -135,7 +135,7 @@ async fn chain_methods_with_fds() {
     let mut conn = Connection::new(socket);
 
     let replies = conn
-        .chain_spawn_process::<ProcessInfo, FileError>(
+        .chain_spawn_process(
             "/bin/cat".to_string(),
             0,
             1,
@@ -149,7 +149,7 @@ async fn chain_methods_with_fds() {
             vec![stdin2.into(), stdout2.into()],
         )
         .unwrap()
-        .send()
+        .send::<ProcessInfo, FileError>()
         .await
         .unwrap();
 

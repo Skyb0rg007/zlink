@@ -275,21 +275,17 @@ fn build_chain_extension_trait(
         /// Extension trait for adding proxy calls to any chain.
         ///
         /// This trait provides methods to add proxy calls to a chain of method calls.
-        pub trait #chain_trait_name<'c, S, ReplyParams, ReplyError>
+        pub trait #chain_trait_name<'c, S>
         where
             S: #crate_path::connection::socket::Socket,
-            ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
-            ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
         {
             #(#chain_extension_methods)*
         }
 
-        impl<'c, S, ReplyParams, ReplyError> #chain_trait_name<'c, S, ReplyParams, ReplyError>
-            for #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
+        impl<'c, S> #chain_trait_name<'c, S>
+            for #crate_path::connection::chain::Chain<'c, S>
         where
             S: #crate_path::connection::socket::Socket,
-            ReplyParams: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
-            ReplyError: ::serde::de::DeserializeOwned + ::core::fmt::Debug,
         {
             #(#chain_extension_impls)*
         }

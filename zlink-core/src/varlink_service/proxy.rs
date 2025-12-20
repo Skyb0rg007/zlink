@@ -38,14 +38,13 @@ use super::{Error, Info, InterfaceDescription};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
-/// // Chain API uses owned types (DeserializeOwned) provided by varlink_service module.
 /// let chain = conn
-///     .chain_get_info::<OwnedReply, OwnedError>()?
+///     .chain_get_info()?
 ///     .get_interface_description("org.example.interface")?
 ///     .get_info()?;
 ///
 /// // Send the chain and process replies.
-/// let replies = chain.send().await?;
+/// let replies = chain.send::<OwnedReply, OwnedError>().await?;
 /// pin_mut!(replies);
 ///
 /// // Process each reply in the order they were chained.
@@ -85,10 +84,11 @@ use super::{Error, Info, InterfaceDescription};
 ///
 /// // Then use the combined types for cross-interface chaining.
 /// let combined_chain = conn
-///     .chain_get_info::<CombinedReply, CombinedError>()?;
+///     .chain_get_info()?;
 ///     // .other_interface_method()?;  // Chain calls from other interfaces
 ///
-/// let combined_replies = combined_chain.send().await?;
+/// // Specify combined types when sending.
+/// let combined_replies = combined_chain.send::<CombinedReply, CombinedError>().await?;
 /// pin_mut!(combined_replies);
 ///
 /// while let Some(result) = combined_replies.next().await {
@@ -164,7 +164,6 @@ mod tests {
     #[tokio::test]
     async fn chain_api_creation() -> crate::Result<()> {
         // Test that we can create chains with the new API.
-        // Note: Chains require DeserializeOwned types, so we use owned types here.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -172,10 +171,9 @@ mod tests {
         let socket = MockSocket::with_responses(&responses);
         let mut conn = Connection::new(socket);
 
-        // Test that we can create the chain APIs with owned types.
-        let _chain1 = conn.chain_get_info::<OwnedReply, OwnedError>()?;
-        let _chain2 =
-            conn.chain_get_interface_description::<OwnedReply, OwnedError>("org.varlink.service")?;
+        // Test that we can create the chain APIs.
+        let _chain1 = conn.chain_get_info()?;
+        let _chain2 = conn.chain_get_interface_description("org.varlink.service")?;
 
         Ok(())
     }
@@ -183,7 +181,6 @@ mod tests {
     #[tokio::test]
     async fn chain_extension_methods() -> crate::Result<()> {
         // Test that we can use chain extension methods.
-        // Note: Chains require DeserializeOwned types, so we use owned types here.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -194,11 +191,11 @@ mod tests {
 
         // Test that we can chain calls using extension methods and actually read replies.
         let chained = conn
-            .chain_get_info::<OwnedReply, OwnedError>()?
+            .chain_get_info()?
             .get_interface_description("org.varlink.service")?
             .get_info()?;
 
-        let replies = chained.send().await?;
+        let replies = chained.send::<OwnedReply, OwnedError>().await?;
         use futures_util::{pin_mut, stream::StreamExt};
         pin_mut!(replies);
 

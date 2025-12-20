@@ -222,7 +222,7 @@ fn generate_no_params_method(
         fn #method_name(
             self,
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, S>
         >;
     };
 
@@ -235,7 +235,7 @@ fn generate_no_params_method(
         fn #method_name(
             self,
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, S>
         > {
             let call = #crate_path::Call::new({
                 #[derive(::serde::Serialize, ::core::fmt::Debug)]
@@ -275,7 +275,7 @@ fn generate_with_params_method(
             self,
             #(#all_param_fields,)*
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, S>
         >
         #combined_where_clause;
     };
@@ -316,7 +316,7 @@ fn generate_with_params_method(
             self,
             #(#all_param_fields,)*
         ) -> #crate_path::Result<
-            #crate_path::connection::chain::Chain<'c, S, ReplyParams, ReplyError>
+            #crate_path::connection::chain::Chain<'c, S>
         >
         #combined_where_clause
         {

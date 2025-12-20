@@ -88,11 +88,11 @@ async fn param_rename_chain_test() {
 
     {
         let replies = conn
-            .chain_set_config::<(), Error>(true, "test_value".to_string())
+            .chain_set_config(true, "test_value".to_string())
             .unwrap()
             .set_config(false, "another_value".to_string())
             .unwrap()
-            .send()
+            .send::<(), Error>()
             .await
             .unwrap();
 

@@ -22,14 +22,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Build the chain of pipelined requests.
-    // Note: Chain API requires owned types (DeserializeOwned) because the internal buffer may be
-    // reused between stream iterations, which would invalidate borrowed references.
-    let mut chain = connection.chain_resolve_hostname::<ReplyParams, ReplyError>(&args[0])?;
+    let mut chain = connection.chain_resolve_hostname(&args[0])?;
     for name in &args[1..] {
         chain = chain.resolve_hostname(name)?;
     }
 
-    let replies = chain.send().await?;
+    // Send all requests at once and get back a stream of replies.
+    let replies = chain.send::<ReplyParams, ReplyError>().await?;
     pin_mut!(replies);
 
     // Collect results and print them.

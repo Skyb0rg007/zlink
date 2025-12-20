@@ -321,17 +321,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = unix::connect("/tmp/batch_processor.varlink").await?;
 
     // Send multiple pipelined requests without waiting for responses.
-    // Chain API requires owned types for replies (OwnedProcessReply, OwnedProcessError).
-    // Input arguments can still be borrowed (&str, ProcessRequest<'_>).
     let replies = conn
-        .chain_process::<OwnedProcessReply, OwnedProcessError>(1, "first")?
+        .chain_process(1, "first")?
         .process(2, "second")?
         .process(3, "third")?
         .batch_process(vec![
             ProcessRequest { id: 4, data: "batch1" },
             ProcessRequest { id: 5, data: "batch2" },
         ])?
-        .send()
+        .send::<OwnedProcessReply, OwnedProcessError>()
         .await?;
 
     // Collect all responses

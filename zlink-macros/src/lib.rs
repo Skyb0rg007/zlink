@@ -524,16 +524,14 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # ];
 /// # let socket = MockSocket::with_responses(&responses);
 /// # let mut conn = zlink::Connection::new(socket);
-/// // Chain calls use owned reply types (OwnedBlogReply, BlogError).
-/// // Input arguments can still be borrowed (&str).
 /// let chain = conn
-///     .chain_create_user::<OwnedBlogReply, BlogError>("Alice")?
+///     .chain_create_user("Alice")?
 ///     .create_post(1, "My first post!")?
 ///     .get_posts_by_user(1)?
 ///     .get_user(1)?;
 ///
 /// // Send all calls in a single batch.
-/// let replies = chain.send().await?;
+/// let replies = chain.send::<OwnedBlogReply, BlogError>().await?;
 /// pin_mut!(replies);
 ///
 /// // Process replies in order.
@@ -624,13 +622,13 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// use varlink_service::Proxy;
 /// use zlink::varlink_service::Chain;
 ///
-/// // Get service info and custom status in one batch using owned reply types.
+/// // Get service info and custom status in one batch.
 /// let chain = conn
-///     .chain_get_info::<OwnedCombinedReply, OwnedCombinedError>()? // Varlink service interface
+///     .chain_get_info()?                                           // Varlink service interface
 ///     .get_status()?                                               // MyService interface
 ///     .get_interface_description("com.example.MyService")?;        // Back to Varlink service
 ///
-/// let replies = chain.send().await?;
+/// let replies = chain.send::<OwnedCombinedReply, OwnedCombinedError>().await?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # }).unwrap();
 /// # }

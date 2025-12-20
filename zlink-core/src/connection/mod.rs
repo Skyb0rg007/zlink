@@ -25,7 +25,7 @@ use core::{fmt::Debug, sync::atomic::AtomicUsize};
 use socket::FetchPeerCredentials;
 pub use write_connection::WriteConnection;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 pub use socket::Socket;
 
 // Type alias for receive methods - std returns FDs, no_std doesn't
@@ -294,17 +294,17 @@ where
     /// // Chain calls and send them in a batch
     /// # #[cfg(feature = "std")]
     /// let replies = conn
-    ///     .chain_call::<Methods, User, ApiError>(&get_user, vec![])?
+    ///     .chain_call::<Methods>(&get_user, vec![])?
     ///     .append(&get_project, vec![])?
-    ///     .send().await?;
+    ///     .send::<User, ApiError>().await?;
     /// # #[cfg(not(feature = "std"))]
     /// # let replies = conn
-    /// #     .chain_call::<Methods, User, ApiError>(&get_user)?
+    /// #     .chain_call::<Methods>(&get_user)?
     /// #     .append(&get_project)?
-    /// #     .send().await?;
+    /// #     .send::<User, ApiError>().await?;
     /// pin_mut!(replies);
     ///
-    /// // Access replies sequentially - types are now fixed by the chain
+    /// // Access replies sequentially.
     /// # #[cfg(feature = "std")]
     /// # {
     /// let (user_reply, _fds) = replies.next().await.unwrap()?;
@@ -360,9 +360,9 @@ where
     ///
     /// // Chain many calls (no upper limit)
     /// # #[cfg(feature = "std")]
-    /// let mut chain = conn.chain_call::<Methods, User, ApiError>(&get_user, vec![])?;
+    /// let mut chain = conn.chain_call::<Methods>(&get_user, vec![])?;
     /// # #[cfg(not(feature = "std"))]
-    /// # let mut chain = conn.chain_call::<Methods, User, ApiError>(&get_user)?;
+    /// # let mut chain = conn.chain_call::<Methods>(&get_user)?;
     /// # #[cfg(feature = "std")]
     /// for i in 2..100 {
     ///     chain = chain.append(&Call::new(Methods::GetUser { id: i }), vec![])?;
@@ -372,10 +372,10 @@ where
     /// #     chain = chain.append(&Call::new(Methods::GetUser { id: i }))?;
     /// # }
     ///
-    /// let replies = chain.send().await?;
+    /// let replies = chain.send::<User, ApiError>().await?;
     /// pin_mut!(replies);
     ///
-    /// // Process all replies sequentially - types are fixed by the chain
+    /// // Process all replies sequentially.
     /// # #[cfg(feature = "std")]
     /// while let Some(result) = replies.next().await {
     ///     let (user_reply, _fds) = result?;
@@ -402,15 +402,13 @@ where
     ///
     /// Instead of multiple write operations, the chain sends all calls in a single
     /// write operation, reducing context switching and therefore minimizing latency.
-    pub fn chain_call<'c, Method, ReplyParams, ReplyError>(
+    pub fn chain_call<'c, Method>(
         &'c mut self,
         call: &Call<Method>,
         #[cfg(feature = "std")] fds: alloc::vec::Vec<std::os::fd::OwnedFd>,
-    ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
+    ) -> Result<Chain<'c, S>>
     where
         Method: Serialize + Debug,
-        ReplyParams: DeserializeOwned + Debug,
-        ReplyError: DeserializeOwned + Debug,
     {
         Chain::new(
             self,
@@ -460,10 +458,10 @@ where
     ///
     /// let user_ids = [1, 2, 3, 4, 5];
     /// let replies = conn
-    ///     .chain_from_iter::<Methods, User, ApiError, _, _>(
+    ///     .chain_from_iter::<Methods, _, _>(
     ///         user_ids.iter().map(|&id| Methods::GetUser { id })
     ///     )?
-    ///     .send()
+    ///     .send::<User, ApiError>()
     ///     .await?;
     /// pin_mut!(replies);
     ///
@@ -477,14 +475,12 @@ where
     /// ```
     ///
     /// [`Error::EmptyChain`]: crate::Error::EmptyChain
-    pub fn chain_from_iter<'c, Method, ReplyParams, ReplyError, MethodCall, MethodCalls>(
+    pub fn chain_from_iter<'c, Method, MethodCall, MethodCalls>(
         &'c mut self,
         calls: MethodCalls,
-    ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
+    ) -> Result<Chain<'c, S>>
     where
         Method: Serialize + Debug,
-        ReplyParams: DeserializeOwned + Debug,
-        ReplyError: DeserializeOwned + Debug,
         MethodCall: Into<Call<Method>>,
         MethodCalls: IntoIterator<Item = MethodCall>,
     {
@@ -554,8 +550,8 @@ where
     /// ];
     ///
     /// let replies = conn
-    ///     .chain_from_iter_with_fds::<Methods, FileResult, ApiError, _, _>(calls_with_fds)?
-    ///     .send()
+    ///     .chain_from_iter_with_fds::<Methods, _, _>(calls_with_fds)?
+    ///     .send::<FileResult, ApiError>()
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -563,14 +559,12 @@ where
     ///
     /// [`Error::EmptyChain`]: crate::Error::EmptyChain
     #[cfg(feature = "std")]
-    pub fn chain_from_iter_with_fds<'c, Method, ReplyParams, ReplyError, MethodCall, MethodCalls>(
+    pub fn chain_from_iter_with_fds<'c, Method, MethodCall, MethodCalls>(
         &'c mut self,
         calls: MethodCalls,
-    ) -> Result<Chain<'c, S, ReplyParams, ReplyError>>
+    ) -> Result<Chain<'c, S>>
     where
         Method: Serialize + Debug,
-        ReplyParams: DeserializeOwned + Debug,
-        ReplyError: DeserializeOwned + Debug,
         MethodCall: Into<Call<Method>>,
         MethodCalls: IntoIterator<Item = (MethodCall, alloc::vec::Vec<std::os::fd::OwnedFd>)>,
     {
