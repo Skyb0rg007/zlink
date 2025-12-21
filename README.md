@@ -303,7 +303,7 @@ The generated code includes type definitions and proxy traits ready to use in yo
 zlink supports method call pipelining for improved throughput and reduced latency. The `proxy` macro
 adds variants for each method named `chain_<method_name>` and a trait named `<TraitName>Chain` that
 allow you to batch multiple requests and send them out at once without waiting for individual
-responses:
+responses.
 
 > **Note**: Chain methods require owned types (`DeserializeOwned`) for **reply** parameters and
 > errors because the internal buffer may be reused between stream iterations. Input arguments can
