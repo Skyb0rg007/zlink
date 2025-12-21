@@ -192,7 +192,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
 
     // `drive_monitor_conn` should have received the drive condition changes.
     let drive_cond = drive_monitor_stream.try_next().await?.unwrap()?;
-    let FtlReply::DriveCondition(condition) = drive_cond else {
+    let OwnedFtlReply::DriveCondition(condition) = drive_cond else {
         panic!("Expected DriveCondition reply");
     };
     assert_eq!(condition, conditions[1]);
@@ -217,13 +217,15 @@ enum OwnedFtlReply {
 
 #[zlink::proxy("org.example.ftl")]
 trait FtlProxy {
+    // Streaming methods require owned return types (DeserializeOwned).
     #[zlink(more, rename = "GetDriveCondition")]
     async fn get_drive_condition_more(
         &mut self,
     ) -> zlink::Result<
-        impl futures_util::Stream<Item = zlink::Result<Result<FtlReply<'_>, FtlError>>>,
+        impl futures_util::Stream<Item = zlink::Result<Result<OwnedFtlReply, FtlError>>>,
     >;
 
+    // Regular methods can use borrowed types.
     async fn locate(&mut self, target: &str) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
 
     // Owned return type variants for chain API (chain methods are generated).
