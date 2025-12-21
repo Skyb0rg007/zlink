@@ -29,14 +29,12 @@ Same rules apply here as for bug reports and feature requests. Plus:
 * Please try your best to follow
   [these guidelines](https://handbook.gnome.org/development/commit-messages.html) for commit
   messages.
-* We also prefer adding [emoji prefixes to commit messages](https://gitmoji.carloscuesta.me/). Since
-  the `gitmoji` CLI tool can be very [slow](https://github.com/zeenix/gimoji#rationale), we
-  recommend using [`gimoji`](https://github.com/zeenix/gimoji) instead. You can also pick an emoji
-  direcitly from [here](https://zeenix.github.io/gimoji/) (please remember to copy the emoji itself
-  and not the `:emoji-code:` string, by just clicking on it). **NOTE:** This is a curated list of
-  emojis that have specific meanings. Please use one of the methods recommended here to select/fetch
-  the most appropriate one. 🙏
-* Add a prefix indicating the packages being changed.
+* We also prefer adding emoji prefixes to commit messages. You can either use
+  [`gimoji`](https://github.com/zeenix/gimoji) CLI tool (which can be installed as a commit hook) or
+  pick one directly from [here](https://zeenix.github.io/gimoji/) (please remember to copy the emoji
+  itself and not the `:emoji-code:` string, by just clicking on it).
+  **NOTE:** This is a curated list of emojis that have specific meanings. Please use one of the
+  methods recommended here to select/fetch the most appropriate one. 🙏
 * Add details to each commit about the changes it contains. PR description is for summarizing the
   overall changes in the PR, while commit logs are for describing the specific changes of the
   commit in question.
