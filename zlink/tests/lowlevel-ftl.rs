@@ -103,10 +103,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
 
         // Locate a target.
         let target = "Alpha Centauri";
-        let reply = conn.locate(target).await.unwrap()?;
-        let FtlReply::Location(location) = reply else {
-            panic!("Unexpected reply");
-        };
+        let location = conn.locate(target).await.unwrap()?;
         assert_eq!(location.name, target);
 
         // Ask for the drive condition, then set them and then ask again.
@@ -226,7 +223,7 @@ trait FtlProxy {
     >;
 
     // Regular methods can use borrowed types.
-    async fn locate(&mut self, target: &str) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+    async fn locate(&mut self, target: &str) -> zlink::Result<Result<Location<'_>, FtlError>>;
 
     // Owned return type variants for chain API (chain methods are generated).
     async fn get_drive_condition(&mut self) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
