@@ -5,7 +5,8 @@ use syn::{Error, FnArg, Pat};
 use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
-        convert_to_single_lifetime, snake_case_to_pascal_case, type_contains_lifetime, ParamAttrs,
+        convert_to_single_lifetime, parse_return_type, snake_case_to_pascal_case,
+        type_contains_lifetime, ParamAttrs,
     },
 };
 
@@ -32,6 +33,14 @@ pub(super) fn generate_chain_method(
     // Skip chain methods for oneway methods since they don't get replies
     // Also skip for methods that return FDs since chains don't support returning FDs
     if method_attrs.is_oneway || method_attrs.return_fds {
+        return Ok((quote! {}, quote! {}));
+    }
+
+    // Skip chain methods for methods with borrowed return types (non-static lifetimes).
+    // Chain API requires DeserializeOwned for reply and error types.
+    let (reply_type, error_type) =
+        parse_return_type(&method.sig.output, method_attrs.is_streaming, false)?;
+    if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
         return Ok((quote! {}, quote! {}));
     }
 

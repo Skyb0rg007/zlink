@@ -5,43 +5,64 @@
 
 use crate::proxy;
 
-use super::{Error, Info, InterfaceDescription};
+use super::{Error, Info, InterfaceDescription, OwnedError, OwnedInfo};
 
 /// Client-side proxy for the `org.varlink.service` interface.
 ///
-/// This trait provides methods to call the standard Varlink service interface
-/// methods on a connection.
+/// This trait provides methods to call the standard Varlink service interface methods on a
+/// connection.
 ///
-/// # Chaining Calls
+/// # Borrowed vs Owned Methods
 ///
-/// The trait is implemented for both [`crate::Connection`] and [`Chain`], allowing you to
-/// chain calls together for efficient batching. Use [`crate::Connection::chain_get_info`] or
-/// [`crate::Connection::chain_get_interface_description`] to start a chain.
+/// The trait provides both borrowed and owned variants of each method:
 ///
-/// ## Owned Data Requirement for Chains
+/// - **Borrowed methods** (`get_info`, `get_interface_description`): Return borrowed types for
+///   efficient zero-copy deserialization. These are preferred for single calls.
 ///
-/// Chain methods require owned types (`DeserializeOwned`) for reply parameters and errors
-/// because the internal buffer may be reused between stream iterations. This limitation may be
-/// lifted in the future when Rust supports lending streams.
+/// - **Owned methods** (`owned_get_info`, `owned_get_interface_description`): Return owned types
+///   ([`OwnedInfo`], [`OwnedError`]) required for the chain API. Chain methods (`chain_*`) are
+///   generated only for these variants since `DeserializeOwned` is required for pipelining.
 ///
-/// [`super::OwnedReply`], [`super::OwnedInfo`], and [`super::OwnedError`] are provided for use
-/// with the chain API.
+/// # Example: Basic Usage
 ///
-/// ## Example
+/// ```no_run
+/// use zlink_core::{Connection, varlink_service::Proxy};
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
+/// // Get service information (borrowed - zero-copy).
+/// let info = conn.get_info().await?.map_err(|e| e.to_string())?;
+/// println!("Service: {} v{} by {}", info.product, info.version, info.vendor);
+/// println!("URL: {}", info.url);
+/// println!("Interfaces: {:?}", info.interfaces);
+///
+/// // Get interface description.
+/// let desc = conn
+///     .get_interface_description("org.varlink.service")
+///     .await?
+///     .map_err(|e| e.to_string())?;
+/// println!("Interface description: {}", desc.as_raw().unwrap());
+///
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Example: Chaining (Pipelining)
 ///
 /// ```no_run
 /// use zlink_core::{
 ///     Connection,
-///     varlink_service::{Chain, OwnedError, OwnedInfo, OwnedReply, Proxy},
+///     varlink_service::{Chain, OwnedError, OwnedReply, Proxy},
 /// };
 /// use futures_util::{pin_mut, stream::StreamExt};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let mut conn: Connection<zlink_core::connection::socket::impl_for_doc::Socket> = todo!();
+/// // Chain multiple calls using owned methods (required for pipelining).
 /// let chain = conn
-///     .chain_get_info()?
-///     .get_interface_description("org.example.interface")?
-///     .get_info()?;
+///     .chain_owned_get_info()?
+///     .owned_get_interface_description("org.example.interface")?
+///     .owned_get_info()?;
 ///
 /// // Send the chain and process replies.
 /// let replies = chain.send::<OwnedReply, OwnedError>().await?;
@@ -50,68 +71,12 @@ use super::{Error, Info, InterfaceDescription};
 /// // Process each reply in the order they were chained.
 /// while let Some(result) = replies.next().await {
 ///     let (reply, _fds) = result?;
-///     match reply.unwrap().parameters().unwrap() {
+///     match reply.unwrap().into_parameters().unwrap() {
 ///         OwnedReply::Info(info) => {
 ///             println!("Service: {} v{} by {}", info.product, info.version, info.vendor);
-///             println!("URL: {}", info.url);
-///             println!("Interfaces: {:?}", info.interfaces);
 ///         }
 ///         OwnedReply::InterfaceDescription(desc) => {
-///             // Use as_raw() to get the raw description string.
 ///             println!("Interface description: {}", desc.as_raw().unwrap());
-///         }
-///     }
-/// }
-///
-/// // For combining multiple interfaces, create a combined reply enum:
-/// use serde::Deserialize;
-///
-/// #[derive(Debug, Deserialize)]
-/// #[serde(untagged)]
-/// enum CombinedReply {
-///     VarlinkService(OwnedReply),
-///     // Add other interface reply types here
-///     // OtherInterface(other_interface::OwnedReply),
-/// }
-///
-/// #[derive(Debug, zlink_core::ReplyError)]
-/// #[zlink(interface = "org.varlink.service")]
-/// enum CombinedError {
-///     // Varlink service errors
-///     InterfaceNotFound { interface: String },
-///     // Add other interface error types here
-/// }
-///
-/// // Then use the combined types for cross-interface chaining.
-/// let combined_chain = conn
-///     .chain_get_info()?;
-///     // .other_interface_method()?;  // Chain calls from other interfaces
-///
-/// // Specify combined types when sending.
-/// let combined_replies = combined_chain.send::<CombinedReply, CombinedError>().await?;
-/// pin_mut!(combined_replies);
-///
-/// while let Some(result) = combined_replies.next().await {
-///     let (reply, _fds) = result?;
-///     match reply {
-///         Ok(reply) => {
-///             match reply.parameters().unwrap() {
-///                 CombinedReply::VarlinkService(varlink_reply) => match varlink_reply {
-///                     OwnedReply::Info(info) => println!("Varlink service info: {:?}", info),
-///                     OwnedReply::InterfaceDescription(desc) => {
-///                         println!("Varlink interface: {:?}", desc)
-///                     }
-///                 }
-///                 // Handle other interface replies here
-///             }
-///         }
-///         Err(error) => {
-///             match error {
-///                 CombinedError::InterfaceNotFound { interface } => {
-///                     println!("Interface not found: {}", interface);
-///                 }
-///                 // Handle other interface errors here
-///             }
 ///         }
 ///     }
 /// }
@@ -128,13 +93,33 @@ use super::{Error, Info, InterfaceDescription};
 pub trait Proxy {
     /// Get information about a Varlink service.
     ///
+    /// This method uses borrowed types for zero-copy deserialization. For chaining (pipelining),
+    /// use [`owned_get_info`](Self::owned_get_info) instead.
+    ///
     /// # Returns
     ///
     /// Two-layer result: outer for connection errors, inner for method errors. On success, contains
     /// service information as [`Info`].
     async fn get_info(&mut self) -> crate::Result<core::result::Result<Info<'_>, Error<'_>>>;
 
+    /// Get information about a Varlink service (owned variant for chain API).
+    ///
+    /// This method returns owned types, which is required for the chain API (pipelining).
+    /// For single calls, prefer [`get_info`](Self::get_info) for zero-copy deserialization.
+    ///
+    /// # Returns
+    ///
+    /// Two-layer result: outer for connection errors, inner for method errors. On success, contains
+    /// service information as [`OwnedInfo`].
+    #[zlink(rename = "GetInfo")]
+    async fn owned_get_info(
+        &mut self,
+    ) -> crate::Result<core::result::Result<OwnedInfo, OwnedError>>;
+
     /// Get the IDL description of an interface.
+    ///
+    /// This method uses borrowed types for zero-copy deserialization. For chaining (pipelining),
+    /// use [`owned_get_interface_description`](Self::owned_get_interface_description) instead.
     ///
     /// # Arguments
     ///
@@ -149,21 +134,38 @@ pub trait Proxy {
         &mut self,
         interface: &str,
     ) -> crate::Result<core::result::Result<InterfaceDescription<'static>, Error<'_>>>;
+
+    /// Get the IDL description of an interface (owned variant for chain API).
+    ///
+    /// This method returns owned types, which is required for the chain API (pipelining).
+    /// For single calls, prefer [`get_interface_description`](Self::get_interface_description)
+    /// for zero-copy deserialization.
+    ///
+    /// # Arguments
+    ///
+    /// * `interface` - The name of the interface to get the description for.
+    ///
+    /// # Returns
+    ///
+    /// Two-layer result: outer for connection errors, inner for method errors. On success, contains
+    /// the unparsed interface definition as a [`InterfaceDescription`]. Use
+    /// [`InterfaceDescription::parse`] to parse it.
+    #[zlink(rename = "GetInterfaceDescription")]
+    async fn owned_get_interface_description(
+        &mut self,
+        interface: &str,
+    ) -> crate::Result<core::result::Result<InterfaceDescription<'static>, OwnedError>>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    // Use consolidated mock socket from test_utils.
-    use crate::{
-        test_utils::mock_socket::MockSocket,
-        varlink_service::{OwnedError, OwnedReply},
-        Connection,
-    };
+    use super::{super::OwnedReply, *};
+    use crate::{test_utils::mock_socket::MockSocket, Connection};
+    use futures_util::{pin_mut, stream::StreamExt};
 
     #[tokio::test]
     async fn chain_api_creation() -> crate::Result<()> {
-        // Test that we can create chains with the new API.
+        // Test that we can create chains with the owned API.
         let responses = [
             r#"{"parameters":{"vendor":"Test","product":"TestProduct","version":"1.0","url":"https://test.com","interfaces":["org.varlink.service"]}}"#,
             r#"{"parameters":{"description":"interface org.varlink.service {}"}}"#,
@@ -172,8 +174,8 @@ mod tests {
         let mut conn = Connection::new(socket);
 
         // Test that we can create the chain APIs.
-        let _chain1 = conn.chain_get_info()?;
-        let _chain2 = conn.chain_get_interface_description("org.varlink.service")?;
+        let _chain1 = conn.chain_owned_get_info()?;
+        let _chain2 = conn.chain_owned_get_interface_description("org.varlink.service")?;
 
         Ok(())
     }
@@ -191,18 +193,17 @@ mod tests {
 
         // Test that we can chain calls using extension methods and actually read replies.
         let chained = conn
-            .chain_get_info()?
-            .get_interface_description("org.varlink.service")?
-            .get_info()?;
+            .chain_owned_get_info()?
+            .owned_get_interface_description("org.varlink.service")?
+            .owned_get_info()?;
 
         let replies = chained.send::<OwnedReply, OwnedError>().await?;
-        use futures_util::{pin_mut, stream::StreamExt};
         pin_mut!(replies);
 
         // Read first reply (GetInfo).
         let (first_reply, _fds) = replies.next().await.unwrap()?;
         let first_reply = first_reply.unwrap();
-        match first_reply.parameters().unwrap() {
+        match first_reply.into_parameters().unwrap() {
             OwnedReply::Info(info) => {
                 assert_eq!(info.vendor, "Test");
                 assert_eq!(info.product, "TestProduct");
@@ -216,7 +217,7 @@ mod tests {
         // Read second reply (GetInterfaceDescription).
         let (second_reply, _fds) = replies.next().await.unwrap()?;
         let second_reply = second_reply.unwrap();
-        match second_reply.parameters().unwrap() {
+        match second_reply.into_parameters().unwrap() {
             OwnedReply::InterfaceDescription(desc) => {
                 assert_eq!(desc.as_raw().unwrap(), "interface org.varlink.service {}");
             }
@@ -226,7 +227,7 @@ mod tests {
         // Read third reply (GetInfo again).
         let (third_reply, _fds) = replies.next().await.unwrap()?;
         let third_reply = third_reply.unwrap();
-        match third_reply.parameters().unwrap() {
+        match third_reply.into_parameters().unwrap() {
             OwnedReply::Info(info) => {
                 assert_eq!(info.vendor, "Test");
             }

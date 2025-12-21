@@ -24,17 +24,28 @@ pub(super) fn convert_to_single_lifetime(ty: &Type) -> Type {
     convert_type_lifetimes(ty, "'__proxy_params")
 }
 
-/// Check if a type contains any lifetime references.
+/// Check if a type contains any non-static lifetime references.
 /// This recursively checks all nested types.
+/// Note: `'static` lifetimes are not considered problematic for chain methods.
 pub(super) fn type_contains_lifetime(ty: &Type) -> bool {
     match ty {
-        Type::Reference(_) => true,
+        Type::Reference(type_ref) => {
+            // Check if it's a 'static reference
+            match &type_ref.lifetime {
+                Some(lt) if lt.ident == "static" => {
+                    // 'static is fine, but check the inner type
+                    type_contains_lifetime(&type_ref.elem)
+                }
+                Some(_) => true, // Non-static lifetime
+                None => true,    // Elided lifetime (treated as non-static)
+            }
+        }
         Type::Path(type_path) => type_path.path.segments.iter().any(|segment| {
             let PathArguments::AngleBracketed(args) = &segment.arguments else {
                 return false;
             };
             args.args.iter().any(|arg| match arg {
-                GenericArgument::Lifetime(_) => true,
+                GenericArgument::Lifetime(lt) => lt.ident != "static",
                 GenericArgument::Type(ty) => type_contains_lifetime(ty),
                 _ => false,
             })
