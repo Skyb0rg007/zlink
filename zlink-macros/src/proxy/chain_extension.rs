@@ -5,7 +5,8 @@ use syn::{Error, FnArg, Pat};
 use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
-        convert_to_single_lifetime, snake_case_to_pascal_case, type_contains_lifetime, ParamAttrs,
+        convert_to_single_lifetime, parse_return_type, snake_case_to_pascal_case,
+        type_contains_lifetime, ParamAttrs,
     },
 };
 
@@ -23,8 +24,15 @@ pub(super) fn generate_chain_extension_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain extension methods for oneway and streaming methods
-    if method_attrs.is_oneway || method_attrs.is_streaming {
+    // Skip chain extension methods for oneway, streaming, and return_fds methods.
+    if method_attrs.is_oneway || method_attrs.is_streaming || method_attrs.return_fds {
+        return Ok((quote! {}, quote! {}));
+    }
+
+    // Skip chain extension methods for methods with borrowed return types (non-static lifetimes).
+    // Chain API requires DeserializeOwned for reply and error types.
+    let (reply_type, error_type) = parse_return_type(&method.sig.output, false, false)?;
+    if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
         return Ok((quote! {}, quote! {}));
     }
 

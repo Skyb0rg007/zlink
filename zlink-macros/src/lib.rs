@@ -444,12 +444,12 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// together. This is useful for reducing round trips and efficiently calling methods across
 /// multiple interfaces. Each method gets a `chain_` prefixed variant that starts a chain.
 ///
-/// ## Example: Chaining Method Calls
+/// **Important**: Chain methods are only generated for proxy methods that use owned types
+/// (`DeserializeOwned`) in their return type. Methods with borrowed types (non-static lifetimes)
+/// don't get chain variants since the internal buffer may be reused between stream iterations.
+/// Input arguments can still use borrowed types.
 ///
-/// Note: Chain methods require owned types (`DeserializeOwned`) for **reply** parameters and errors
-/// because the internal buffer may be reused between stream iterations. Input arguments can still
-/// use borrowed types. This limitation may be lifted in the future when Rust supports lending
-/// streams.
+/// ## Example: Chaining Method Calls
 ///
 /// ```rust
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -457,32 +457,17 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # use serde::{Deserialize, Serialize};
 /// # use futures_util::{pin_mut, TryStreamExt};
 /// #
-/// // Borrowed reply types for single-call methods.
-/// # #[derive(Debug, Serialize, Deserialize)]
-/// # struct User<'a> { id: u64, name: &'a str }
-/// # #[derive(Debug, Serialize, Deserialize)]
-/// # struct Post<'a> { id: u64, user_id: u64, content: &'a str }
-/// # #[derive(Debug, Serialize, Deserialize)]
-/// # #[serde(untagged)]
-/// # enum BlogReply<'a> {
-/// #     #[serde(borrow)]
-/// #     User(User<'a>),
-/// #     #[serde(borrow)]
-/// #     Post(Post<'a>),
-/// #     #[serde(borrow)]
-/// #     Posts(Vec<Post<'a>>)
-/// # }
 /// // Owned reply types for chain API.
 /// # #[derive(Debug, Serialize, Deserialize)]
-/// # struct OwnedUser { id: u64, name: String }
+/// # struct User { id: u64, name: String }
 /// # #[derive(Debug, Serialize, Deserialize)]
-/// # struct OwnedPost { id: u64, user_id: u64, content: String }
+/// # struct Post { id: u64, user_id: u64, content: String }
 /// # #[derive(Debug, Serialize, Deserialize)]
 /// # #[serde(untagged)]
-/// # enum OwnedBlogReply {
-/// #     User(OwnedUser),
-/// #     Post(OwnedPost),
-/// #     Posts(Vec<OwnedPost>)
+/// # enum BlogReply {
+/// #     User(User),
+/// #     Post(Post),
+/// #     Posts(Vec<Post>)
 /// # }
 /// # #[derive(Debug, Serialize, Deserialize)]
 /// # #[serde(tag = "error")]
@@ -497,22 +482,21 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # }
 /// # impl std::error::Error for BlogError {}
 /// #
-/// // Define proxies for two different services.
-/// // Single-call methods use borrowed reply types.
+/// // Define proxies with owned return types - chain methods are generated.
 /// #[proxy("org.example.blog.Users")]
 /// trait UsersProxy {
 ///     async fn get_user(&mut self, id: u64)
-///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
+///         -> zlink::Result<Result<BlogReply, BlogError>>;
 ///     async fn create_user(&mut self, name: &str)
-///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
+///         -> zlink::Result<Result<BlogReply, BlogError>>;
 /// }
 ///
 /// #[proxy("org.example.blog.Posts")]
 /// trait PostsProxy {
 ///     async fn get_posts_by_user(&mut self, user_id: u64)
-///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
+///         -> zlink::Result<Result<BlogReply, BlogError>>;
 ///     async fn create_post(&mut self, user_id: u64, content: &str)
-///         -> zlink::Result<Result<BlogReply<'_>, BlogError>>;
+///         -> zlink::Result<Result<BlogReply, BlogError>>;
 /// }
 ///
 /// # use zlink::test_utils::mock_socket::MockSocket;
@@ -531,7 +515,7 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     .get_user(1)?;
 ///
 /// // Send all calls in a single batch.
-/// let replies = chain.send::<OwnedBlogReply, BlogError>().await?;
+/// let replies = chain.send::<BlogReply, BlogError>().await?;
 /// pin_mut!(replies);
 ///
 /// // Process replies in order.
@@ -540,9 +524,9 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 ///     reply_count += 1;
 ///     if let Ok(response) = reply {
 ///         match response.parameters() {
-///             Some(OwnedBlogReply::User(user)) => assert_eq!(user.name, "Alice"),
-///             Some(OwnedBlogReply::Post(post)) => assert_eq!(post.content, "My first post!"),
-///             Some(OwnedBlogReply::Posts(posts)) => assert_eq!(posts.len(), 1),
+///             Some(BlogReply::User(user)) => assert_eq!(user.name, "Alice"),
+///             Some(BlogReply::Post(post)) => assert_eq!(post.content, "My first post!"),
+///             Some(BlogReply::Posts(posts)) => assert_eq!(posts.len(), 1),
 ///             None => {} // set_value returns empty response
 ///         }
 ///     }
@@ -552,86 +536,82 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// # }).unwrap();
 /// ```
 ///
-/// ## Combining with Standard Varlink Service
+/// ## Combining Multiple Services
 ///
-/// When the `idl-parse` feature is enabled, you can also chain calls between your custom
-/// interfaces and the standard Varlink service interface for introspection. Remember that
-/// chain methods require owned types (`DeserializeOwned`) for **replies**.
+/// You can chain calls across multiple custom services. Define a combined reply type that can
+/// deserialize responses from all interfaces:
 ///
 /// ```rust
-/// # #[cfg(feature = "idl-parse")] {
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// # use zlink::{proxy, varlink_service, ReplyError};
+/// # use zlink::proxy;
 /// # use serde::{Deserialize, Serialize};
+/// # use futures_util::{pin_mut, TryStreamExt};
 /// #
 /// # #[derive(Debug, Serialize, Deserialize)]
 /// # struct Status { active: bool, message: String }
 /// # #[derive(Debug, Serialize, Deserialize)]
+/// # struct HealthInfo { healthy: bool, uptime: u64 }
+/// # #[derive(Debug, Serialize, Deserialize)]
 /// # #[serde(tag = "error")]
-/// # enum MyError { NotFound, InvalidRequest }
+/// # enum ServiceError { NotFound, InvalidRequest }
+/// # impl std::fmt::Display for ServiceError {
+/// #     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+/// #         match self {
+/// #             Self::NotFound => write!(f, "Not found"),
+/// #             Self::InvalidRequest => write!(f, "Invalid input")
+/// #         }
+/// #     }
+/// # }
+/// # impl std::error::Error for ServiceError {}
 /// #
-/// #[proxy("com.example.MyService")]
-/// trait MyServiceProxy {
-///     async fn get_status(&mut self) -> zlink::Result<Result<Status, MyError>>;
+/// // Multiple proxies with owned return types.
+/// #[proxy("com.example.StatusService")]
+/// trait StatusProxy {
+///     async fn get_status(&mut self) -> zlink::Result<Result<Status, ServiceError>>;
 /// }
 ///
-/// // Owned reply types for cross-interface chaining (required by chain API).
-/// #[derive(Debug, Deserialize)]
-/// struct OwnedInfo {
-///     vendor: String,
-///     product: String,
-///     version: String,
-///     url: String,
-///     interfaces: Vec<String>,
+/// #[proxy("com.example.HealthService")]
+/// trait HealthProxy {
+///     async fn get_health(&mut self) -> zlink::Result<Result<HealthInfo, ServiceError>>;
 /// }
 ///
-/// #[derive(Debug, Deserialize)]
-/// struct OwnedInterfaceDescription {
-///     description: String,
-/// }
-///
+/// // Combined reply type for cross-interface chaining.
 /// #[derive(Debug, Deserialize)]
 /// #[serde(untagged)]
-/// enum OwnedCombinedReply {
-///     Info(OwnedInfo),
-///     InterfaceDescription(OwnedInterfaceDescription),
-///     MyService(Status),
+/// enum CombinedReply {
+///     Status(Status),
+///     Health(HealthInfo),
 /// }
 ///
-/// // For deserialization, we can use #[serde(untagged)] to combine error types.
-/// #[derive(Debug, Deserialize)]
-/// #[serde(untagged)]
-/// enum OwnedCombinedError {
-///     InterfaceNotFound { interface: String },
-///     MyService(MyError),
-/// }
-///
-/// // Example usage:
 /// # use zlink::test_utils::mock_socket::MockSocket;
 /// # let responses = vec![
-/// #     concat!(
-/// #         r#"{"parameters":{"vendor":"Test","product":"Example","version":"1.0","#,
-/// #         r#""url":"https://example.com","interfaces":["com.example.MyService","#,
-/// #         r#""org.varlink.service"]}}"#
-/// #     ),
 /// #     r#"{"parameters":{"active":true,"message":"Running"}}"#,
-/// #     r#"{"parameters":{"description":"interface com.example.MyService\n..."}}"#,
+/// #     r#"{"parameters":{"healthy":true,"uptime":12345}}"#,
 /// # ];
 /// # let socket = MockSocket::with_responses(&responses);
 /// # let mut conn = zlink::Connection::new(socket);
-/// use varlink_service::Proxy;
-/// use zlink::varlink_service::Chain;
-///
-/// // Get service info and custom status in one batch.
+/// // Chain calls across both services.
 /// let chain = conn
-///     .chain_get_info()?                                           // Varlink service interface
-///     .get_status()?                                               // MyService interface
-///     .get_interface_description("com.example.MyService")?;        // Back to Varlink service
+///     .chain_get_status()?
+///     .get_health()?;
 ///
-/// let replies = chain.send::<OwnedCombinedReply, OwnedCombinedError>().await?;
+/// let replies = chain.send::<CombinedReply, ServiceError>().await?;
+/// pin_mut!(replies);
+///
+/// let mut count = 0;
+/// while let Some((reply, _fds)) = replies.try_next().await? {
+///     count += 1;
+///     if let Ok(response) = reply {
+///         match response.parameters() {
+///             Some(CombinedReply::Status(s)) => println!("Status: {}", s.message),
+///             Some(CombinedReply::Health(h)) => println!("Uptime: {}", h.uptime),
+///             None => {}
+///         }
+///     }
+/// }
+/// assert_eq!(count, 2);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # }).unwrap();
-/// # }
 /// ```
 ///
 /// ## Chain Extension Traits

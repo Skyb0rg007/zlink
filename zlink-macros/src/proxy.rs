@@ -264,7 +264,9 @@ fn build_chain_extension_trait(
     crate_path: &TokenStream,
     custom_chain_name: Option<syn::Ident>,
 ) -> TokenStream {
-    if chain_extension_methods.is_empty() {
+    // Skip generating chain trait if there are no methods and no custom name.
+    // When a custom name is specified, always generate the trait for API consistency.
+    if chain_extension_methods.is_empty() && custom_chain_name.is_none() {
         return quote! {};
     }
 

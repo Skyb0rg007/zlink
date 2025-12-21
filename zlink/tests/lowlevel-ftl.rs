@@ -110,11 +110,12 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
         assert_eq!(location.name, target);
 
         // Ask for the drive condition, then set them and then ask again.
+        // Use owned variants for chain methods (chain requires owned types).
         let replies = conn
             .chain_get_drive_condition()?
             .set_drive_condition(conditions[1])?
             .get_drive_condition()?
-            .send::<FtlReply, FtlError>()
+            .send::<OwnedFtlReply, FtlError>()
             .await?;
 
         // Now we should be able to get all the replies.
@@ -124,7 +125,8 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             // First reply: initial drive condition
             let (reply, _fds) = replies.next().await.unwrap()?;
             let reply = reply.unwrap();
-            let Some(FtlReply::DriveCondition(drive_condition)) = reply.into_parameters() else {
+            let Some(OwnedFtlReply::DriveCondition(drive_condition)) = reply.into_parameters()
+            else {
                 panic!("Unexpected reply");
             };
             assert_eq!(drive_condition, conditions[0]);
@@ -132,7 +134,8 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             // Second reply: confirmation of set_drive_condition
             let (reply, _fds) = replies.next().await.unwrap()?;
             let reply = reply.unwrap();
-            let Some(FtlReply::DriveCondition(drive_condition)) = reply.into_parameters() else {
+            let Some(OwnedFtlReply::DriveCondition(drive_condition)) = reply.into_parameters()
+            else {
                 panic!("Unexpected reply");
             };
             assert_eq!(drive_condition, conditions[1]);
@@ -140,7 +143,8 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             // Third reply: get_drive_condition after the set
             let (reply, _fds) = replies.next().await.unwrap()?;
             let reply = reply.unwrap();
-            let Some(FtlReply::DriveCondition(drive_condition)) = reply.into_parameters() else {
+            let Some(OwnedFtlReply::DriveCondition(drive_condition)) = reply.into_parameters()
+            else {
                 panic!("Unexpected reply");
             };
             // Should match the current server state (after the set_drive_condition call)
@@ -152,9 +156,8 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
 
         let duration = 10;
         let impossible_speed = conditions[1].tylium_level / duration + 1;
+        // Use owned variants for chain methods.
         let replies = conn
-            // Let's try to jump to a new coordinate but first requiring more tylium
-            // than we have.
             .chain_jump(DriveConfiguration {
                 speed: impossible_speed,
                 trajectory: 1,
@@ -166,7 +169,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
                 trajectory: 1,
                 duration,
             })?
-            .send::<FtlReply, FtlError>()
+            .send::<OwnedFtlReply, FtlError>()
             .await?;
         pin_mut!(replies);
         let (result, _fds) = replies.try_next().await?.unwrap();
@@ -179,7 +182,7 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
         let reply = reply?;
         assert_eq!(
             reply.parameters(),
-            Some(&FtlReply::Coordinates(Coordinate {
+            Some(&OwnedFtlReply::Coordinates(Coordinate {
                 longitude: 1.0,
                 latitude: 0.0,
                 distance: 10,
@@ -197,10 +200,23 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+// Owned versions for chain API (requires DeserializeOwned).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+struct OwnedLocation {
+    name: String,
+    coordinates: Coordinate,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(untagged)]
+enum OwnedFtlReply {
+    DriveCondition(DriveCondition),
+    Coordinates(Coordinate),
+    Location(OwnedLocation),
+}
+
 #[zlink::proxy("org.example.ftl")]
 trait FtlProxy {
-    async fn get_drive_condition(&mut self) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
-
     #[zlink(more, rename = "GetDriveCondition")]
     async fn get_drive_condition_more(
         &mut self,
@@ -208,17 +224,20 @@ trait FtlProxy {
         impl futures_util::Stream<Item = zlink::Result<Result<FtlReply<'_>, FtlError>>>,
     >;
 
+    async fn locate(&mut self, target: &str) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+
+    // Owned return type variants for chain API (chain methods are generated).
+    async fn get_drive_condition(&mut self) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
+
     async fn set_drive_condition(
         &mut self,
         condition: DriveCondition,
-    ) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+    ) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
 
     async fn jump(
         &mut self,
         config: DriveConfiguration,
-    ) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
-
-    async fn locate(&mut self, target: &str) -> zlink::Result<Result<FtlReply<'_>, FtlError>>;
+    ) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
 }
 
 // The FTL service.
