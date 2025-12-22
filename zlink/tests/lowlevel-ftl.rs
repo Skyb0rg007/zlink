@@ -151,40 +151,95 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             assert!(replies.next().await.is_none());
         }
 
-        let duration = 10;
-        let impossible_speed = conditions[1].tylium_level / duration + 1;
-        // Use owned variants for chain methods.
-        let replies = conn
-            .chain_jump(DriveConfiguration {
-                speed: impossible_speed,
-                trajectory: 1,
-                duration,
-            })?
-            // Now let's try to jump with a valid speed.
-            .jump(DriveConfiguration {
-                speed: impossible_speed - 1,
-                trajectory: 1,
-                duration,
-            })?
-            .send::<OwnedFtlReply, FtlError>()
-            .await?;
-        pin_mut!(replies);
-        let (result, _fds) = replies.try_next().await?.unwrap();
-        let e = result.unwrap_err();
-        // The first call should fail because we didn't have enough energy.
-        assert_eq!(e, FtlError::NotEnoughEnergy);
+        {
+            let duration = 10;
+            let impossible_speed = conditions[1].tylium_level / duration + 1;
+            // Use owned variants for chain methods.
+            let replies = conn
+                .chain_jump(DriveConfiguration {
+                    speed: impossible_speed,
+                    trajectory: 1,
+                    duration,
+                })?
+                // Now let's try to jump with a valid speed.
+                .jump(DriveConfiguration {
+                    speed: impossible_speed - 1,
+                    trajectory: 1,
+                    duration,
+                })?
+                .send::<OwnedFtlReply, FtlError>()
+                .await?;
+            pin_mut!(replies);
+            let (result, _fds) = replies.try_next().await?.unwrap();
+            let e = result.unwrap_err();
+            // The first call should fail because we didn't have enough energy.
+            assert_eq!(e, FtlError::NotEnoughEnergy);
 
-        // The second call should succeed.
-        let (reply, _fds) = replies.try_next().await?.unwrap();
-        let reply = reply?;
-        assert_eq!(
-            reply.parameters(),
-            Some(&OwnedFtlReply::Coordinates(Coordinate {
-                longitude: 1.0,
-                latitude: 0.0,
-                distance: 10,
-            }))
-        );
+            // The second call should succeed.
+            let (reply, _fds) = replies.try_next().await?.unwrap();
+            let reply = reply?;
+            assert_eq!(
+                reply.parameters(),
+                Some(&OwnedFtlReply::Coordinates(Coordinate {
+                    longitude: 1.0,
+                    latitude: 0.0,
+                    distance: 10,
+                }))
+            );
+        }
+
+        // Test oneway chain methods with a sandwich pattern to verify interleaving works.
+        // After the jump test above, coordinates should be (1.0, 0.0, 10).
+        // Pattern: get_coordinates -> reset_coordinates -> reset_coordinates -> get_coordinates
+        // This tests:
+        // 1. chain_get_coordinates() starts a chain with a regular call
+        // 2. reset_coordinates() chain extension is generated for oneway methods
+        // 3. Two consecutive oneway calls work correctly
+        // 4. Oneway calls are actually handled (coordinates change from non-zero to zero)
+        // 5. Only 2 replies are received (one per regular call, none for oneway)
+        {
+            let replies = conn
+                .chain_get_coordinates()?
+                .reset_coordinates()?
+                .reset_coordinates()?
+                .get_coordinates()?
+                .send::<OwnedFtlReply, FtlError>()
+                .await?;
+            pin_mut!(replies);
+
+            // First reply: coordinates before reset (non-zero from jump).
+            let (reply, _fds) = replies.next().await.unwrap()?;
+            let reply = reply.unwrap();
+            let Some(OwnedFtlReply::Coordinates(coords)) = reply.into_parameters() else {
+                panic!("Expected Coordinates reply");
+            };
+            assert_eq!(
+                coords,
+                Coordinate {
+                    longitude: 1.0,
+                    latitude: 0.0,
+                    distance: 10,
+                }
+            );
+
+            // Second reply: coordinates after reset (should be zero).
+            let (reply, _fds) = replies.next().await.unwrap()?;
+            let reply = reply.unwrap();
+            let Some(OwnedFtlReply::Coordinates(coords)) = reply.into_parameters() else {
+                panic!("Expected Coordinates reply");
+            };
+            assert_eq!(
+                coords,
+                Coordinate {
+                    longitude: 0.0,
+                    latitude: 0.0,
+                    distance: 0,
+                }
+            );
+
+            // No more replies - oneway calls don't generate replies.
+            assert!(replies.next().await.is_none());
+        }
     }
 
     // `drive_monitor_conn` should have received the drive condition changes.
@@ -237,6 +292,12 @@ trait FtlProxy {
         &mut self,
         config: DriveConfiguration,
     ) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
+
+    async fn get_coordinates(&mut self) -> zlink::Result<Result<OwnedFtlReply, FtlError>>;
+
+    // Oneway method - no reply expected. Chain methods are generated for these.
+    #[zlink(oneway)]
+    async fn reset_coordinates(&mut self) -> zlink::Result<()>;
 }
 
 // The FTL service.
@@ -330,6 +391,15 @@ impl Service for Ftl {
                     coordinates,
                 };
                 MethodReply::Single(Some(Reply::Ftl(FtlReply::Location(location))))
+            }
+            Method::Ftl(FtlMethod::ResetCoordinates) => {
+                // Oneway method - reset coordinates and don't send a reply.
+                self.coordinates = Coordinate {
+                    longitude: 0.0,
+                    latitude: 0.0,
+                    distance: 0,
+                };
+                MethodReply::Single(None)
             }
             Method::VarlinkSrv(VarlinkSrvMethod::GetInfo) => {
                 let interfaces = Vec::from_iter(INTERFACES.iter().cloned());
@@ -454,6 +524,7 @@ enum FtlMethod<'a> {
     GetCoordinates,
     Jump { config: DriveConfiguration },
     Locate { target: Cow<'a, str> },
+    ResetCoordinates,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
