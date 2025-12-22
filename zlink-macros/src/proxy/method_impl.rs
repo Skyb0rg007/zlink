@@ -89,6 +89,18 @@ pub(super) fn generate_method_impl(
         )?
     };
 
+    // Streaming methods require owned return types (DeserializeOwned) because the internal buffer
+    // may be reused between stream iterations.
+    if method_attrs.is_streaming
+        && (type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type))
+    {
+        return Err(Error::new_spanned(
+            &method.sig.output,
+            "streaming methods (`more`) require owned return types (no non-static lifetimes) \
+             because the internal buffer may be reused between stream iterations",
+        ));
+    }
+
     // Generate the method parameters as an Option
     #[cfg(feature = "std")]
     let (params_struct_def, params_init, fds_init) = generate_method_params(

@@ -168,6 +168,8 @@ where
     ) -> crate::Result<Option<Service::ReplyStream>> {
         let mut stream = None;
         match self.service.handle(&call, conn).await {
+            // Don't send replies or errors for oneway calls.
+            MethodReply::Single(_) | MethodReply::Error(_) if call.oneway() => (),
             MethodReply::Single(params) => {
                 let reply = Reply::new(params).set_continues(Some(false));
                 conn.send_reply(&reply, vec![]).await?

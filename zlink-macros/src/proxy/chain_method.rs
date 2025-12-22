@@ -30,18 +30,20 @@ pub(super) fn generate_chain_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain methods for oneway methods since they don't get replies
-    // Also skip for methods that return FDs since chains don't support returning FDs
-    if method_attrs.is_oneway || method_attrs.return_fds {
+    // Skip chain methods for methods that return FDs since chains don't support returning FDs.
+    if method_attrs.return_fds {
         return Ok((quote! {}, quote! {}));
     }
 
-    // Skip chain methods for methods with borrowed return types (non-static lifetimes).
+    // For non-oneway methods, skip if return types have borrowed types.
     // Chain API requires DeserializeOwned for reply and error types.
-    let (reply_type, error_type) =
-        parse_return_type(&method.sig.output, method_attrs.is_streaming, false)?;
-    if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
-        return Ok((quote! {}, quote! {}));
+    // Oneway methods don't have return types so this check doesn't apply to them.
+    if !method_attrs.is_oneway {
+        let (reply_type, error_type) =
+            parse_return_type(&method.sig.output, method_attrs.is_streaming, false)?;
+        if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
+            return Ok((quote! {}, quote! {}));
+        }
     }
 
     // Generate chain method name
@@ -115,6 +117,7 @@ pub(super) fn generate_chain_method(
         &method_where_clause,
         has_any_lifetime,
         has_explicit_lifetimes,
+        method_attrs.is_oneway,
         crate_path,
     );
     #[cfg(feature = "std")]
@@ -211,6 +214,7 @@ fn generate_method_call_creation(
     method_where_clause: &Option<syn::WhereClause>,
     has_any_lifetime: bool,
     has_explicit_lifetimes: bool,
+    is_oneway: bool,
     crate_path: &TokenStream,
 ) -> MethodCallResult {
     // Separate FD parameters from regular parameters
@@ -299,7 +303,17 @@ fn generate_method_call_creation(
             let method_call = #wrapper_enum_name::Method(#params_struct_name {
                 #(#regular_arg_names,)*
             });
-            let call = #crate_path::Call::new(method_call);
+        };
+
+        let call_creation = if is_oneway {
+            quote! { let call = #crate_path::Call::new(method_call).set_oneway(true); }
+        } else {
+            quote! { let call = #crate_path::Call::new(method_call); }
+        };
+
+        let method_call_creation = quote! {
+            #method_call_creation
+            #call_creation
         };
 
         #[cfg(feature = "std")]
@@ -325,7 +339,17 @@ fn generate_method_call_creation(
             }
 
             let method_call = #wrapper_enum_name::Method;
-            let call = #crate_path::Call::new(method_call);
+        };
+
+        let call_creation = if is_oneway {
+            quote! { let call = #crate_path::Call::new(method_call).set_oneway(true); }
+        } else {
+            quote! { let call = #crate_path::Call::new(method_call); }
+        };
+
+        let method_call_creation = quote! {
+            #method_call_creation
+            #call_creation
         };
 
         #[cfg(feature = "std")]
