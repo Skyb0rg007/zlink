@@ -24,16 +24,19 @@ pub(super) fn generate_chain_extension_method(
     // Check for explicit lifetimes early
     let has_explicit_lifetimes = method.sig.generics.lifetimes().next().is_some();
 
-    // Skip chain extension methods for oneway, streaming, and return_fds methods.
-    if method_attrs.is_oneway || method_attrs.is_streaming || method_attrs.return_fds {
+    // Skip chain extension methods for streaming and return_fds methods.
+    if method_attrs.is_streaming || method_attrs.return_fds {
         return Ok((quote! {}, quote! {}));
     }
 
-    // Skip chain extension methods for methods with borrowed return types (non-static lifetimes).
+    // For non-oneway methods, skip if return types have borrowed types.
     // Chain API requires DeserializeOwned for reply and error types.
-    let (reply_type, error_type) = parse_return_type(&method.sig.output, false, false)?;
-    if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
-        return Ok((quote! {}, quote! {}));
+    // Oneway methods don't have return types so this check doesn't apply to them.
+    if !method_attrs.is_oneway {
+        let (reply_type, error_type) = parse_return_type(&method.sig.output, false, false)?;
+        if type_contains_lifetime(&reply_type) || type_contains_lifetime(&error_type) {
+            return Ok((quote! {}, quote! {}));
+        }
     }
 
     let converted_name = snake_case_to_pascal_case(&method_name_str);
@@ -112,6 +115,7 @@ pub(super) fn generate_chain_extension_method(
         generate_no_params_method(
             &method_ident,
             &method_path,
+            method_attrs.is_oneway,
             #[cfg(feature = "std")]
             fds_init,
             crate_path,
@@ -129,6 +133,7 @@ pub(super) fn generate_chain_extension_method(
             &method_where_clause,
             has_any_lifetime,
             has_explicit_lifetimes,
+            method_attrs.is_oneway,
             #[cfg(feature = "std")]
             fds_init,
             crate_path,
@@ -222,6 +227,7 @@ fn build_combined_where_clause(method_where_clause: &Option<syn::WhereClause>) -
 fn generate_no_params_method(
     method_name: &syn::Ident,
     method_path: &str,
+    is_oneway: bool,
     #[cfg(feature = "std")] fds_init: TokenStream,
     crate_path: &TokenStream,
 ) -> Result<(TokenStream, TokenStream), Error> {
@@ -239,21 +245,31 @@ fn generate_no_params_method(
     #[cfg(not(feature = "std"))]
     let append_args = quote! { &call };
 
+    let oneway = if is_oneway {
+        quote! { .set_oneway(true) }
+    } else {
+        quote! {}
+    };
+
+    let call_creation = quote! {
+        let call = #crate_path::Call::new({
+            #[derive(::serde::Serialize, ::core::fmt::Debug)]
+            #[serde(tag = "method")]
+            enum MethodWrapper {
+                #[serde(rename = #method_path)]
+                Method,
+            }
+            MethodWrapper::Method
+        }) #oneway;
+    };
+
     let impl_method = quote! {
         fn #method_name(
             self,
         ) -> #crate_path::Result<
             #crate_path::connection::chain::Chain<'c, S>
         > {
-            let call = #crate_path::Call::new({
-                #[derive(::serde::Serialize, ::core::fmt::Debug)]
-                #[serde(tag = "method")]
-                enum MethodWrapper {
-                    #[serde(rename = #method_path)]
-                    Method,
-                }
-                MethodWrapper::Method
-            });
+            #call_creation
             self.append(#append_args)
         }
     };
@@ -274,6 +290,7 @@ fn generate_with_params_method(
     method_where_clause: &Option<syn::WhereClause>,
     has_any_lifetime: bool,
     has_explicit_lifetimes: bool,
+    is_oneway: bool,
     #[cfg(feature = "std")] fds_init: TokenStream,
     crate_path: &TokenStream,
 ) -> Result<(TokenStream, TokenStream), Error> {
@@ -319,6 +336,36 @@ fn generate_with_params_method(
     #[cfg(not(feature = "std"))]
     let append_args = quote! { &call };
 
+    let method_call_expr = quote! {
+        {
+            #[derive(::serde::Serialize, ::core::fmt::Debug)]
+            struct #params_struct_name #generics
+            #struct_where
+            {
+                #(#regular_param_fields,)*
+            }
+
+            #[derive(::serde::Serialize, ::core::fmt::Debug)]
+            #[serde(tag = "method", content = "parameters")]
+            enum #wrapper_enum_name #struct_generics_without_bounds
+            #struct_where
+            {
+                #[serde(rename = #method_path)]
+                Method(#params_struct_name #struct_generics_without_bounds),
+            }
+
+            #wrapper_enum_name::Method(#params_struct_name {
+                #(#arg_names,)*
+            })
+        }
+    };
+
+    let call_creation = if is_oneway {
+        quote! { let call = #crate_path::Call::new(#method_call_expr).set_oneway(true); }
+    } else {
+        quote! { let call = #crate_path::Call::new(#method_call_expr); }
+    };
+
     let impl_method = quote! {
         fn #method_name #generics(
             self,
@@ -328,27 +375,7 @@ fn generate_with_params_method(
         >
         #combined_where_clause
         {
-            let call = #crate_path::Call::new({
-                #[derive(::serde::Serialize, ::core::fmt::Debug)]
-                struct #params_struct_name #generics
-                #struct_where
-                {
-                    #(#regular_param_fields,)*
-                }
-
-                #[derive(::serde::Serialize, ::core::fmt::Debug)]
-                #[serde(tag = "method", content = "parameters")]
-                enum #wrapper_enum_name #struct_generics_without_bounds
-                #struct_where
-                {
-                    #[serde(rename = #method_path)]
-                    Method(#params_struct_name #struct_generics_without_bounds),
-                }
-
-                #wrapper_enum_name::Method(#params_struct_name {
-                    #(#arg_names,)*
-                })
-            });
+            #call_creation
             self.append(#append_args)
         }
     };
