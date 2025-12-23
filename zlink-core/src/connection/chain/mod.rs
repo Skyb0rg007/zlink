@@ -6,7 +6,6 @@ pub use reply_stream::ReplyStream;
 
 use crate::{connection::Socket, Call, Connection, Result};
 use core::fmt::Debug;
-use futures_util::stream::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// A chain of method calls that will be sent together.
@@ -89,17 +88,16 @@ where
     /// In std mode, each reply includes any file descriptors received.
     pub async fn send<ReplyParams, ReplyError>(
         self,
-    ) -> Result<impl Stream<Item = Result<reply_stream::ChainResult<ReplyParams, ReplyError>>> + 'c>
+    ) -> Result<ReplyStream<'c, ReplyParams, ReplyError>>
     where
-        ReplyParams: DeserializeOwned + Debug + 'c,
-        ReplyError: DeserializeOwned + Debug + 'c,
+        ReplyParams: DeserializeOwned + Debug,
+        ReplyError: DeserializeOwned + Debug,
     {
         // Flush all enqueued calls.
         self.connection.write.flush().await?;
 
         Ok(ReplyStream::new(
             self.connection.read_mut(),
-            |conn| async { conn.receive_reply::<ReplyParams, ReplyError>().await },
             self.reply_count,
         ))
     }

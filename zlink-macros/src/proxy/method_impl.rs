@@ -488,18 +488,6 @@ fn generate_streaming_method(
     };
 
     #[cfg(feature = "std")]
-    let receive_and_return = quote! {
-        let (reply, fds) = conn.receive_reply::<#reply_type, #error_type>().await?;
-        Ok((reply, fds))
-    };
-
-    #[cfg(not(feature = "std"))]
-    let receive_and_return = quote! {
-        let reply = conn.receive_reply::<#reply_type, #error_type>().await?;
-        Ok(reply)
-    };
-
-    #[cfg(feature = "std")]
     let map_stream = if return_fds {
         quote! {
             stream.map(|result| {
@@ -538,11 +526,8 @@ fn generate_streaming_method(
     let implementation = quote! {
         #send_and_receive
 
-        let stream = #crate_path::connection::chain::ReplyStream::new(
+        let stream = #crate_path::connection::chain::ReplyStream::<#reply_type, #error_type>::new(
             self.read_mut(),
-            |conn| async {
-                #receive_and_return
-            },
             1,
         );
 

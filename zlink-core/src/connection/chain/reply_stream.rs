@@ -1,11 +1,10 @@
+use alloc::boxed::Box;
 use core::{
     fmt::Debug,
-    future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
-use futures_util::stream::Stream;
-use pin_project_lite::pin_project;
+use futures_util::stream::{unfold, Stream};
 use serde::de::DeserializeOwned;
 
 use crate::{
@@ -27,166 +26,91 @@ pub(crate) type ChainResult<Params, ReplyError> =
 #[cfg(not(feature = "std"))]
 pub(crate) type ChainResult<Params, ReplyError> = reply::Result<Params, ReplyError>;
 
-pin_project! {
-    /// A stream of replies from a chain of method calls.
-    ///
-    /// # Owned Data Requirement
-    ///
-    /// Stream items must use owned types (`DeserializeOwned`) rather than borrowed types. This is
-    /// because the internal buffer may be reused between stream iterations, which would invalidate
-    /// borrowed references. This limitation may be lifted in the future when Rust supports lending
-    /// streams.
-    #[derive(Debug)]
-    pub struct ReplyStream<'c, Read: ReadHalf, F, Fut, Params, ReplyError> {
-        #[pin]
-        state: ReplyStreamState<Fut>,
-        connection: &'c mut ReadConnection<Read>,
-        func: F,
-        call_count: usize,
-        current_index: usize,
-        done: bool,
-        _phantom: core::marker::PhantomData<(Params, ReplyError)>,
-    }
+/// A stream of replies from a chain of method calls.
+///
+/// # Owned Data Requirement
+///
+/// Stream items must use owned types (`DeserializeOwned`) rather than borrowed types. This is
+/// because the internal buffer may be reused between stream iterations, which would invalidate
+/// borrowed references. This limitation may be lifted in the future when Rust supports lending
+/// streams.
+///
+/// This is used internally by the proxy macro for streaming methods.
+pub struct ReplyStream<'c, Params, ReplyError> {
+    inner: InnerStream<'c, Params, ReplyError>,
 }
 
-impl<'c, Read, F, Fut, Params, ReplyError> ReplyStream<'c, Read, F, Fut, Params, ReplyError>
+impl<'c, Params, ReplyError> ReplyStream<'c, Params, ReplyError>
 where
-    Read: ReadHalf,
-    F: FnMut(&'c mut ReadConnection<Read>) -> Fut,
-    Fut: Future<Output = Result<ChainResult<Params, ReplyError>>>,
     Params: DeserializeOwned + Debug,
     ReplyError: DeserializeOwned + Debug,
 {
     /// Create a new reply stream.
     ///
-    /// This is used internally by the proxy macro for streaming methods.
+    /// The stream will yield `reply_count` replies from the connection.
     #[doc(hidden)]
-    pub fn new(connection: &'c mut ReadConnection<Read>, func: F, call_count: usize) -> Self {
-        ReplyStream {
-            state: ReplyStreamState::Init,
-            connection,
-            func,
-            call_count,
-            current_index: 0,
-            done: false,
-            _phantom: core::marker::PhantomData,
+    pub fn new<Read>(connection: &'c mut ReadConnection<Read>, reply_count: usize) -> Self
+    where
+        Read: ReadHalf + 'c,
+    {
+        // State is (connection, current_index). The connection reference flows through each
+        // iteration.
+        let inner = unfold(
+            (connection, 0),
+            move |(conn, mut current_index)| async move {
+                if current_index >= reply_count {
+                    return None;
+                }
+
+                let item = conn.receive_reply::<Params, ReplyError>().await;
+                let item_ref = item.as_ref();
+                #[cfg(feature = "std")]
+                // In std mode, we need to ignore the FDs.
+                let item_ref = item_ref.map(|r| &r.0);
+
+                // Update index based on result.
+                match item_ref {
+                    Ok(Ok(r)) if r.continues() != Some(true) => {
+                        current_index += 1;
+                    }
+                    Ok(Ok(_)) => {
+                        // Streaming reply, don't increment index yet.
+                    }
+                    Ok(Err(_)) => {
+                        // For method errors, always increment since there won't be more
+                        // replies.
+                        current_index += 1;
+                    }
+                    Err(_) => {
+                        // General error, mark stream as done.
+                        current_index = reply_count;
+                    }
+                }
+
+                Some((item, (conn, current_index)))
+            },
+        );
+
+        Self {
+            inner: Box::pin(inner),
         }
     }
 }
 
-impl<'c, Read, F, Fut, Params, ReplyError> Stream
-    for ReplyStream<'c, Read, F, Fut, Params, ReplyError>
-where
-    Read: ReadHalf,
-    F: FnMut(&'c mut ReadConnection<Read>) -> Fut,
-    Fut: Future<Output = Result<ChainResult<Params, ReplyError>>>,
-    Params: DeserializeOwned + Debug,
-    ReplyError: DeserializeOwned + Debug,
-{
+impl<Params, ReplyError> Debug for ReplyStream<'_, Params, ReplyError> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ReplyStream").finish_non_exhaustive()
+    }
+}
+
+impl<Params, ReplyError> Stream for ReplyStream<'_, Params, ReplyError> {
     type Item = Result<ChainResult<Params, ReplyError>>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        if *this.done {
-            return Poll::Ready(None);
-        }
-
-        if this.state.as_mut().check_init() {
-            let conn = unsafe { &mut *(*this.connection as *mut _) };
-            this.state.set(ReplyStreamState::Future {
-                future: (this.func)(conn),
-            });
-        }
-
-        let item = match this.state.as_mut().project_future() {
-            Some(fut) => ready!(fut.poll(cx)),
-            None => panic!("ReplyStream must not be polled after it returned `Poll::Ready(None)`"),
-        };
-
-        // Only increment current_index if this is the last reply for this call.
-        // (i.e., continues is not Some(true))
-        #[cfg(feature = "std")]
-        {
-            match &item {
-                Ok((Ok(reply), _fds)) if reply.continues() != Some(true) => {
-                    *this.current_index += 1;
-                }
-                Ok((Ok(_), _fds)) => {
-                    // Streaming reply, don't increment index yet.
-                }
-                Ok((Err(_), _fds)) => {
-                    // For method errors, always increment since there won't be more replies.
-                    *this.current_index += 1;
-                }
-                Err(_) => {
-                    // If there was a general error, mark the stream as done as it's likely not
-                    // recoverable.
-                    *this.done = true;
-                }
-            }
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            match &item {
-                Ok(Ok(reply)) if reply.continues() != Some(true) => {
-                    *this.current_index += 1;
-                }
-                Ok(Ok(_)) => {
-                    // Streaming reply, don't increment index yet.
-                }
-                Ok(Err(_)) => {
-                    // For method errors, always increment since there won't be more replies.
-                    *this.current_index += 1;
-                }
-                Err(_) => {
-                    // If there was a general error, mark the stream as done as it's likely not
-                    // recoverable.
-                    *this.done = true;
-                }
-            }
-        }
-        if *this.current_index >= *this.call_count {
-            *this.done = true;
-        }
-
-        this.state.set(ReplyStreamState::Init);
-
-        Poll::Ready(Some(item))
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
     }
 }
 
-pin_project! {
-    /// State for `ReplyStream`.
-    ///
-    /// Based on the [`futures::stream::unfold`] implementation.
-    #[project = ReplyStreamStateProj]
-    #[project_replace = ReplyStreamStateProjReplace]
-    #[derive(Debug)]
-    enum ReplyStreamState<R> {
-        Init,
-        Future {
-            #[pin]
-            future: R,
-        },
-        Empty,
-    }
-}
-
-impl<R> ReplyStreamState<R> {
-    fn project_future(self: Pin<&mut Self>) -> Option<Pin<&mut R>> {
-        match self.project() {
-            ReplyStreamStateProj::Future { future } => Some(future),
-            _ => None,
-        }
-    }
-
-    fn check_init(self: Pin<&mut Self>) -> bool {
-        match &*self {
-            Self::Init => match self.project_replace(Self::Empty) {
-                ReplyStreamStateProjReplace::Init => true,
-                _ => unreachable!(),
-            },
-            _ => false,
-        }
-    }
-}
+/// The boxed inner stream type for `ReplyStream`.
+type InnerStream<'c, Params, ReplyError> =
+    Pin<Box<dyn Stream<Item = Result<ChainResult<Params, ReplyError>>> + 'c>>;
