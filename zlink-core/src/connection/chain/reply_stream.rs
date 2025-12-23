@@ -48,7 +48,6 @@ where
     /// Create a new reply stream.
     ///
     /// The stream will yield `reply_count` replies from the connection.
-    #[doc(hidden)]
     pub fn new<Read>(connection: &'c mut ReadConnection<Read>, reply_count: usize) -> Self
     where
         Read: ReadHalf + 'c,

@@ -1,7 +1,6 @@
 //! Chain method calls.
 
 mod reply_stream;
-#[doc(hidden)]
 pub use reply_stream::ReplyStream;
 
 use crate::{connection::Socket, Call, Connection, Result};
