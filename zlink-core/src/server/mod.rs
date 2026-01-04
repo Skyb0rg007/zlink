@@ -58,16 +58,46 @@ where
         let mut listener = self.listener.take().unwrap();
         let mut connections = Vec::new();
         let mut reply_streams = Vec::<ReplyStream<Service::ReplyStream, Listener::Socket>>::new();
+        let mut reply_stream_futures = Vec::new();
+        // Vec for futures from `Connection::receive_call`. Reused across iterations to avoid
+        // per-iteration allocations.
+        let mut read_futures = Vec::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
 
         loop {
-            let mut reply_stream_futures: Vec<_> =
-                reply_streams.iter_mut().map(|s| s.stream.next()).collect();
+            // We re-populate the `reply_stream_futures` in each iteration so we must clear it
+            // first.
+            reply_stream_futures.clear();
+            {
+                // SAFETY: Rust has no way to know that we don't re-use the mutable references in
+                // each iteration (since we clear the `reply_stream_futures` vector) so we need to
+                // go through a pointer to work around this.
+                let reply_streams: &mut Vec<ReplyStream<Service::ReplyStream, Listener::Socket>> =
+                    unsafe { &mut *(&mut reply_streams as *mut Vec<_>) };
+                reply_stream_futures.extend(reply_streams.iter_mut().map(|s| s.stream.next()));
+            }
             let start_index = last_reply_stream_winner.map(|idx| idx + 1);
             let mut reply_stream_select_all = SelectAll::new(start_index);
             for future in reply_stream_futures.iter_mut() {
                 reply_stream_select_all.push(future);
+            }
+
+            // Prepare futures for reading method calls from connections.
+            read_futures.clear();
+            {
+                // SAFETY: Same as above - mutable references are not reused across iterations.
+                let connections: &mut Vec<Connection<Listener::Socket>> =
+                    unsafe { &mut *(&mut connections as *mut Vec<_>) };
+                read_futures.extend(connections.iter_mut().map(|c| c.receive_call()));
+            }
+            let mut read_select_all = SelectAll::new(last_method_call_winner.map(|idx| idx + 1));
+            for future in &mut read_futures {
+                // SAFETY: Futures in `read_futures` are dropped in place via `clear()` at the
+                // start of the next iteration, never moved while pinned.
+                unsafe {
+                    read_select_all.push_unchecked(future);
+                }
             }
 
             futures_util::select_biased! {
@@ -76,13 +106,8 @@ where
                     connections.push(conn?);
                 }
                 // 2. Read method calls from the existing connections and handle them.
-                res = self.get_next_call(
-                    // SAFETY: `connections` is not invalidated or dropped until the output of
-                    // this future is dropped.
-                    unsafe { &mut *(&mut connections as *mut Vec<_>) },
-                    last_method_call_winner.map(|idx| idx + 1),
-                ).fuse() => {
-                        let (idx, call) = res?;
+                (idx, result) = read_select_all.fuse() => {
+                        let call = result.map(|(call, _fds)| call);
                         last_method_call_winner = Some(idx);
 
                         let mut stream = None;
@@ -132,33 +157,6 @@ where
                 }
             }
         }
-    }
-
-    /// Read the next method call from the connection.
-    ///
-    /// # Return value
-    ///
-    /// On success, this method returns a tuple containing:
-    ///
-    /// * The index of the connection that yielded a call.
-    /// * A Result, containing a method call if reading was successful.
-    async fn get_next_call<'r>(
-        &mut self,
-        connections: &'r mut [Connection<Listener::Socket>],
-        start_index: Option<usize>,
-    ) -> crate::Result<(usize, crate::Result<Call<Service::MethodCall<'r>>>)> {
-        let mut read_futures: Vec<_> = connections.iter_mut().map(|c| c.receive_call()).collect();
-        let mut select_all = SelectAll::new(start_index);
-        for future in &mut read_futures {
-            // Safety: `future` is in fact `Unpin` but the compiler doesn't know that.
-            unsafe {
-                select_all.push_unchecked(future);
-            }
-        }
-
-        let (idx, result) = select_all.await;
-        let result = result.map(|(call, _fds)| call);
-        Ok((idx, result))
     }
 
     async fn handle_call(
