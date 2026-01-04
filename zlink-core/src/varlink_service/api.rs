@@ -46,7 +46,8 @@ pub enum Reply<'a> {
 /// This type uses owned types ([`OwnedInfo`]) instead of borrowed types, allowing it to be
 /// deserialized as owned data. This is required for the chain API because the internal buffer
 /// may be reused between stream iterations.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(any(not(feature = "idl"), feature = "idl-parse"), derive(Deserialize))]
 #[serde(untagged)]
 pub enum OwnedReply {
     /// Reply for `GetInfo` method.
