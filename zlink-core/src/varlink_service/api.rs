@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, string::String};
+use alloc::borrow::Cow;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "introspection")]
@@ -169,87 +169,108 @@ impl core::fmt::Display for Error<'_> {
 
 /// Owned version of [`Error`] for use with the chain API.
 ///
-/// This type uses `String` instead of `Cow<'_, str>` for all fields, allowing it to be deserialized
-/// as owned data. This is required for the chain API because the internal buffer may be reused
-/// between stream iterations.
-#[derive(Debug, Clone, PartialEq, crate::ReplyError)]
-#[zlink(interface = "org.varlink.service")]
-pub enum OwnedError {
-    /// The requested interface was not found.
-    InterfaceNotFound {
-        /// The interface that was not found.
-        interface: String,
-    },
-    /// The requested method was not found.
-    MethodNotFound {
-        /// The method that was not found.
-        method: String,
-    },
-    /// The interface defines the requested method, but the service does not implement it.
-    MethodNotImplemented {
-        /// The method that is not implemented.
-        method: String,
-    },
-    /// One of the passed parameters is invalid.
-    InvalidParameter {
-        /// The parameter that is invalid.
-        parameter: String,
-    },
-    /// Client is denied access.
-    PermissionDenied,
-    /// Method is expected to be called with 'more' set to true, but wasn't.
-    ExpectedMore,
+/// This is a newtype wrapper around `Error<'static>`, allowing it to be deserialized as owned data.
+/// This is required for the chain API because the internal buffer may be reused between stream
+/// iterations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedError(Error<'static>);
+
+impl OwnedError {
+    /// Returns a reference to the inner `Error`.
+    pub fn inner(&self) -> &Error<'static> {
+        &self.0
+    }
+
+    /// Consumes self and returns the inner `Error`.
+    pub fn into_inner(self) -> Error<'static> {
+        self.0
+    }
+}
+
+impl core::ops::Deref for OwnedError {
+    type Target = Error<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for OwnedError {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl core::error::Error for OwnedError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        None
+        self.0.source()
     }
 }
 
 impl core::fmt::Display for OwnedError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            OwnedError::InterfaceNotFound { interface } => {
-                write!(f, "Interface not found: {interface}")
-            }
-            OwnedError::MethodNotFound { method } => {
-                write!(f, "Method not found: {method}")
-            }
-            OwnedError::InvalidParameter { parameter } => {
-                write!(f, "Invalid parameter: {parameter}")
-            }
-            OwnedError::PermissionDenied => {
-                write!(f, "Permission denied")
-            }
-            OwnedError::ExpectedMore => {
-                write!(f, "Expected more")
-            }
-            OwnedError::MethodNotImplemented { method } => {
-                write!(f, "Method not implemented: {method}")
-            }
-        }
+        self.0.fmt(f)
     }
 }
 
 impl<'a> From<Error<'a>> for OwnedError {
     fn from(err: Error<'a>) -> Self {
-        match err {
-            Error::InterfaceNotFound { interface } => OwnedError::InterfaceNotFound {
-                interface: interface.into_owned(),
-            },
-            Error::MethodNotFound { method } => OwnedError::MethodNotFound {
-                method: method.into_owned(),
-            },
-            Error::MethodNotImplemented { method } => OwnedError::MethodNotImplemented {
-                method: method.into_owned(),
-            },
-            Error::InvalidParameter { parameter } => OwnedError::InvalidParameter {
-                parameter: parameter.into_owned(),
-            },
-            Error::PermissionDenied => OwnedError::PermissionDenied,
-            Error::ExpectedMore => OwnedError::ExpectedMore,
+        Self(err.into_owned())
+    }
+}
+
+impl Serialize for OwnedError {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OwnedError {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use alloc::string::String;
+
+        // Helper enum that deserializes into owned strings.
+        #[derive(Deserialize)]
+        #[serde(tag = "error", content = "parameters")]
+        enum ErrorHelper {
+            #[serde(rename = "org.varlink.service.InterfaceNotFound")]
+            InterfaceNotFound { interface: String },
+            #[serde(rename = "org.varlink.service.MethodNotFound")]
+            MethodNotFound { method: String },
+            #[serde(rename = "org.varlink.service.MethodNotImplemented")]
+            MethodNotImplemented { method: String },
+            #[serde(rename = "org.varlink.service.InvalidParameter")]
+            InvalidParameter { parameter: String },
+            #[serde(rename = "org.varlink.service.PermissionDenied")]
+            PermissionDenied,
+            #[serde(rename = "org.varlink.service.ExpectedMore")]
+            ExpectedMore,
         }
+
+        let helper = ErrorHelper::deserialize(deserializer)?;
+        let error = match helper {
+            ErrorHelper::InterfaceNotFound { interface } => Error::InterfaceNotFound {
+                interface: Cow::Owned(interface),
+            },
+            ErrorHelper::MethodNotFound { method } => Error::MethodNotFound {
+                method: Cow::Owned(method),
+            },
+            ErrorHelper::MethodNotImplemented { method } => Error::MethodNotImplemented {
+                method: Cow::Owned(method),
+            },
+            ErrorHelper::InvalidParameter { parameter } => Error::InvalidParameter {
+                parameter: Cow::Owned(parameter),
+            },
+            ErrorHelper::PermissionDenied => Error::PermissionDenied,
+            ErrorHelper::ExpectedMore => Error::ExpectedMore,
+        };
+        Ok(Self(error))
     }
 }
 

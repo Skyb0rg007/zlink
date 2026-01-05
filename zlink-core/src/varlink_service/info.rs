@@ -1,6 +1,6 @@
 #[cfg(feature = "introspection")]
 use crate::introspect::Type;
-use alloc::{string::String, vec::Vec};
+use alloc::{borrow::Cow, vec::Vec};
 use serde::{Deserialize, Serialize};
 
 /// Information about a Varlink service implementation.
@@ -11,41 +11,61 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "introspection", zlink(crate = "crate"))]
 pub struct Info<'a> {
     /// The vendor of the service.
-    pub vendor: &'a str,
+    #[serde(borrow)]
+    pub vendor: Cow<'a, str>,
     /// The product name of the service.
-    pub product: &'a str,
+    #[serde(borrow)]
+    pub product: Cow<'a, str>,
     /// The version of the service.
-    pub version: &'a str,
+    #[serde(borrow)]
+    pub version: Cow<'a, str>,
     /// The URL associated with the service.
-    pub url: &'a str,
+    #[serde(borrow)]
+    pub url: Cow<'a, str>,
     /// List of interfaces provided by the service.
-    pub interfaces: Vec<&'a str>,
+    #[serde(borrow)]
+    pub interfaces: Vec<Cow<'a, str>>,
 }
 
 impl<'a> Info<'a> {
     /// Create a new `Info` instance.
     pub fn new(
-        vendor: &'a str,
-        product: &'a str,
-        version: &'a str,
-        url: &'a str,
-        interfaces: Vec<&'a str>,
+        vendor: impl Into<Cow<'a, str>>,
+        product: impl Into<Cow<'a, str>>,
+        version: impl Into<Cow<'a, str>>,
+        url: impl Into<Cow<'a, str>>,
+        interfaces: impl IntoIterator<Item = impl Into<Cow<'a, str>>>,
     ) -> Self {
         Self {
-            vendor,
-            product,
-            version,
-            url,
-            interfaces,
+            vendor: vendor.into(),
+            product: product.into(),
+            version: version.into(),
+            url: url.into(),
+            interfaces: interfaces.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Convert this info into an owned version with `'static` lifetime.
+    pub fn into_owned(self) -> Info<'static> {
+        Info {
+            vendor: Cow::Owned(self.vendor.into_owned()),
+            product: Cow::Owned(self.product.into_owned()),
+            version: Cow::Owned(self.version.into_owned()),
+            url: Cow::Owned(self.url.into_owned()),
+            interfaces: self
+                .interfaces
+                .into_iter()
+                .map(|s| Cow::Owned(s.into_owned()))
+                .collect(),
         }
     }
 }
 
 /// Owned version of [`Info`] for use with the chain API.
 ///
-/// This type uses `String` instead of `&str` for all fields, allowing it to be deserialized
-/// as owned data. This is required for the chain API because the internal buffer may be reused
-/// between stream iterations.
+/// This is a newtype wrapper around `Info<'static>`, allowing it to be deserialized as owned data.
+/// This is required for the chain API because the internal buffer may be reused between stream
+/// iterations.
 ///
 /// # Example
 ///
@@ -56,48 +76,77 @@ impl<'a> Info<'a> {
 /// let json = r#"{"vendor":"Test","product":"Product","version":"1.0","url":"https://example.com","interfaces":["org.varlink.service"]}"#;
 /// let info: OwnedInfo = serde_json::from_str(json).unwrap();
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OwnedInfo {
-    /// The vendor of the service.
-    pub vendor: String,
-    /// The product name of the service.
-    pub product: String,
-    /// The version of the service.
-    pub version: String,
-    /// The URL associated with the service.
-    pub url: String,
-    /// List of interfaces provided by the service.
-    pub interfaces: Vec<String>,
-}
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OwnedInfo(Info<'static>);
 
 impl OwnedInfo {
     /// Create a new `OwnedInfo` instance.
     pub fn new(
-        vendor: String,
-        product: String,
-        version: String,
-        url: String,
-        interfaces: Vec<String>,
+        vendor: impl Into<Cow<'static, str>>,
+        product: impl Into<Cow<'static, str>>,
+        version: impl Into<Cow<'static, str>>,
+        url: impl Into<Cow<'static, str>>,
+        interfaces: impl IntoIterator<Item = impl Into<Cow<'static, str>>>,
     ) -> Self {
-        Self {
-            vendor,
-            product,
-            version,
-            url,
-            interfaces,
-        }
+        Self(Info::new(vendor, product, version, url, interfaces))
+    }
+
+    /// Returns a reference to the inner `Info`.
+    pub fn inner(&self) -> &Info<'static> {
+        &self.0
+    }
+
+    /// Consumes self and returns the inner `Info`.
+    pub fn into_inner(self) -> Info<'static> {
+        self.0
+    }
+}
+
+impl core::ops::Deref for OwnedInfo {
+    type Target = Info<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for OwnedInfo {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
 impl<'a> From<Info<'a>> for OwnedInfo {
     fn from(info: Info<'a>) -> Self {
-        Self {
-            vendor: info.vendor.into(),
-            product: info.product.into(),
-            version: info.version.into(),
-            url: info.url.into(),
-            interfaces: info.interfaces.into_iter().map(Into::into).collect(),
+        Self(info.into_owned())
+    }
+}
+
+impl<'de> Deserialize<'de> for OwnedInfo {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use alloc::string::String;
+
+        // Deserialize into owned strings directly.
+        #[derive(Deserialize)]
+        struct InfoOwned {
+            vendor: String,
+            product: String,
+            version: String,
+            url: String,
+            interfaces: Vec<String>,
         }
+
+        let info = InfoOwned::deserialize(deserializer)?;
+        Ok(Self(Info {
+            vendor: Cow::Owned(info.vendor),
+            product: Cow::Owned(info.product),
+            version: Cow::Owned(info.version),
+            url: Cow::Owned(info.url),
+            interfaces: info.interfaces.into_iter().map(Cow::Owned).collect(),
+        }))
     }
 }
 

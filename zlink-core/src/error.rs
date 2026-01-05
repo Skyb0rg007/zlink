@@ -25,7 +25,7 @@ pub enum Error {
     /// Missing required parameters.
     MissingParameters,
     /// A general service error.
-    VarlinkService(crate::varlink_service::Error<'static>),
+    VarlinkService(crate::varlink_service::OwnedError),
     /// Empty chain creation attempt.
     EmptyChain,
 }
