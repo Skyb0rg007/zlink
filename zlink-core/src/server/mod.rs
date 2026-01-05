@@ -23,7 +23,7 @@ where
     Listener: listener::Listener,
     Service: service::Service,
 {
-    /// Create a new server that serves `service` to incomming connections from `listener`.
+    /// Create a new server that serves `service` to incoming connections from `listener`.
     pub fn new(listener: Listener, service: Service) -> Self {
         Self {
             listener: Some(listener),
@@ -43,7 +43,8 @@ where
     /// Fortunately, there are easy workarounds for this. You can either:
     ///
     /// * Use a thread-local runtime (for example [`tokio::runtime::LocalRuntime`] or
-    ///   [`tokio::task::LocalSet`]) to run the server in a local task, perhaps in a seprate thread.
+    ///   [`tokio::task::LocalSet`]) to run the server in a local task, perhaps in a separate
+    ///   thread.
     /// * Use some common API to run multiple futures at once, such as [`futures::select!`] or
     ///   [`tokio::select!`].
     ///

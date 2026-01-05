@@ -1,4 +1,4 @@
-//! Serice-related API.
+//! Service-related API.
 
 use core::{fmt::Debug, future::Future};
 
