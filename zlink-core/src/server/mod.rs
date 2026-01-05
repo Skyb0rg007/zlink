@@ -2,7 +2,7 @@ pub(crate) mod listener;
 mod select_all;
 pub mod service;
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use futures_util::{FutureExt, StreamExt};
 use select_all::SelectAll;
 use service::MethodReply;
@@ -107,7 +107,10 @@ where
                 }
                 // 2. Read method calls from the existing connections and handle them.
                 (idx, result) = read_select_all.fuse() => {
+                        #[cfg(feature = "std")]
                         let call = result.map(|(call, _fds)| call);
+                        #[cfg(not(feature = "std"))]
+                        let call = result;
                         last_method_call_winner = Some(idx);
 
                         let mut stream = None;
@@ -139,11 +142,12 @@ where
 
                     match reply {
                         Some(reply) => {
-                            if let Err(e) = reply_streams[idx]
-                                .conn
-                                .send_reply(&reply, vec![])
-                                .await
-                            {
+                            #[cfg(feature = "std")]
+                            let send_result =
+                                reply_streams[idx].conn.send_reply(&reply, alloc::vec![]).await;
+                            #[cfg(not(feature = "std"))]
+                            let send_result = reply_streams[idx].conn.send_reply(&reply).await;
+                            if let Err(e) = send_result {
                                 warn!("Error writing to client {}: {:?}", id, e);
                                 reply_streams.swap_remove(idx);
                             }
@@ -170,9 +174,15 @@ where
             MethodReply::Single(_) | MethodReply::Error(_) if call.oneway() => (),
             MethodReply::Single(params) => {
                 let reply = Reply::new(params).set_continues(Some(false));
-                conn.send_reply(&reply, vec![]).await?
+                #[cfg(feature = "std")]
+                conn.send_reply(&reply, alloc::vec![]).await?;
+                #[cfg(not(feature = "std"))]
+                conn.send_reply(&reply).await?;
             }
-            MethodReply::Error(err) => conn.send_error(&err, vec![]).await?,
+            #[cfg(feature = "std")]
+            MethodReply::Error(err) => conn.send_error(&err, alloc::vec![]).await?,
+            #[cfg(not(feature = "std"))]
+            MethodReply::Error(err) => conn.send_error(&err).await?,
             MethodReply::Multi(s) => {
                 trace!("Client {} now turning into a reply stream", conn.id());
                 stream = Some(s)
