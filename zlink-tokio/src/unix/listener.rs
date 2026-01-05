@@ -30,6 +30,12 @@ impl crate::Listener for Listener {
     }
 }
 
+impl From<tokio::net::UnixListener> for Listener {
+    fn from(listener: tokio::net::UnixListener) -> Self {
+        Listener { listener }
+    }
+}
+
 impl TryFrom<OwnedFd> for Listener {
     type Error = crate::Error;
 
