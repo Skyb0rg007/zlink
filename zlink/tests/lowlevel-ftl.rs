@@ -96,9 +96,12 @@ async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::er
             .get_interface_description("org.varlink.unimplemented")
             .await
             .unwrap_err();
+        let zlink::Error::VarlinkService(owned_error) = error else {
+            panic!("Expected VarlinkService error");
+        };
         assert!(matches!(
-            error,
-            zlink::Error::VarlinkService(varlink_service::Error::InterfaceNotFound { .. })
+            owned_error.inner(),
+            varlink_service::Error::InterfaceNotFound { .. }
         ));
 
         // Locate a target.

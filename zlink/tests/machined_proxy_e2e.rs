@@ -35,8 +35,8 @@ async fn introspect_machined() {
         assert!(info.product.contains("systemd"));
         assert_eq!(info.url, "https://systemd.io/");
 
-        // Verify that the expected interfaces are present
-        let interfaces: Vec<&str> = info.interfaces.iter().copied().collect();
+        // Verify that the expected interfaces are present.
+        let interfaces: Vec<&str> = info.interfaces.iter().map(AsRef::as_ref).collect();
         assert!(interfaces.contains(&"io.systemd.Machine"));
         assert!(interfaces.contains(&"org.varlink.service"));
 

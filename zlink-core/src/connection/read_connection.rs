@@ -115,7 +115,7 @@ impl<Read: ReadHalf> ReadConnection<Read> {
 
         let result = match msg {
             // Varlink service interface error need to be returned as the top-level error.
-            ReplyMsg::Varlink(e) => Err(crate::Error::VarlinkService(e.into_owned())),
+            ReplyMsg::Varlink(e) => Err(crate::Error::VarlinkService(e.into())),
             ReplyMsg::Error(e) => Ok(Err(e)),
             ReplyMsg::Reply(reply) => Ok(Ok(reply)),
         };
