@@ -39,7 +39,7 @@ type RecvResult<T> = T;
 /// The low-level API to send and receive messages.
 ///
 /// Each connection gets a unique identifier when created that can be queried using
-/// [`Connection::id`]. This ID is shared betwen the read and write halves of the connection. It
+/// [`Connection::id`]. This ID is shared between the read and write halves of the connection. It
 /// can be used to associate the read and write halves of the same connection.
 ///
 /// # Cancel safety
