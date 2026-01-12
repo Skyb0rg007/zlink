@@ -14,9 +14,9 @@ proc-macro = true
 [features]
 default = ["proxy"]
 std = []
-proxy = ["syn/full", "syn/clone-impls", "zlink/proxy"]
-idl-parse = ["zlink/idl-parse"]
-introspection = ["zlink/introspection"]
+proxy = ["syn/full", "syn/clone-impls"]
+idl-parse = []
+introspection = []
 
 [dependencies]
 proc-macro2 = "1.0"
@@ -29,7 +29,7 @@ syn = { version = "2.0", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-zlink = { path = "../zlink", default-features = false, features = ["tokio"] }
+zlink = { path = "../zlink", default-features = false, features = ["tokio", "introspection"] }
 serde = "1.0"
 serde_json = "1.0"
 serde-json-core = { version = "0.6.0", default-features = false, features = [
