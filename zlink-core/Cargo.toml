@@ -20,7 +20,7 @@ introspection = ["std", "idl", "zlink-macros/introspection"]
 
 [dependencies]
 serde = { version = "1.0.218", default-features = false, features = ["derive", "alloc"] }
-zlink-macros = { path = "../zlink-macros", version = "=0.2.0" }
+zlink-macros = { path = "../zlink-macros", version = "=0.3.0" }
 serde_json = { version = "1.0.139", default-features = false, features = ["alloc"] }
 itoa = { version = "1.0", default-features = false }
 ryu = { version = "1.0", default-features = false }
