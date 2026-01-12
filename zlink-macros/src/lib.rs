@@ -649,6 +649,37 @@ pub fn derive_introspect_reply_error(input: proc_macro::TokenStream) -> proc_mac
 /// ErrorType>>>>`. The proxy will automatically set the 'more' flag on the call and return a
 /// stream of replies.
 ///
+/// # One-way Methods
+///
+/// For fire-and-forget methods that don't expect a reply, use the `#[zlink(oneway)]` attribute.
+/// One-way methods send the call and return immediately without waiting for a response. The method
+/// must return `zlink::Result<()>` (just the outer Result for connection errors, no inner Result
+/// since there's no reply to process).
+///
+/// One-way methods cannot be combined with `#[zlink(more)]` or `#[zlink(return_fds)]`.
+///
+/// This attribute is particularly useful in combination with chaining method calls. When you chain
+/// oneway methods with regular methods, the oneway calls are sent but don't contribute to the reply
+/// stream. For example, if you chain 4 calls where 2 are regular and 2 are oneway, you'll only
+/// receive 2 replies. This allows you to efficiently batch side-effect operations (like resets or
+/// notifications) alongside queries in a single round-trip.
+///
+/// ```rust
+/// # use zlink::proxy;
+/// # use serde::{Deserialize, Serialize};
+/// #[proxy("org.example.Notifications")]
+/// trait NotificationsProxy {
+///     /// Fire-and-forget notification - returns immediately without waiting for a reply.
+///     #[zlink(oneway)]
+///     async fn notify(&mut self, message: &str) -> zlink::Result<()>;
+///
+///     /// Another one-way method with multiple parameters.
+///     #[zlink(oneway)]
+///     async fn log_event(&mut self, level: &str, message: &str, timestamp: u64)
+///         -> zlink::Result<()>;
+/// }
+/// ```
+///
 /// # File Descriptor Passing
 ///
 /// **Requires the `std` feature to be enabled.**
