@@ -85,7 +85,6 @@ commit_parsers = [
     # Breaking changes/removals.
     { message = "^💥", group = "Breaking" },
     { message = "^🔥", group = "Removed" },
-    { message = "^➖", group = "Removed" },
     { message = "^🗑️", group = "Deprecated" },
 
     # Dependencies.
@@ -93,6 +92,7 @@ commit_parsers = [
     { message = "^⬇️", group = "Dependencies" },
     { message = "^📌", group = "Dependencies" },
     { message = "^➕", group = "Dependencies" },
+    { message = "^➖", group = "Dependencies" },
 
     # Security.
     { message = "^🔒", group = "Security" },
