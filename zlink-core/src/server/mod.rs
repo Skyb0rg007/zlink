@@ -21,7 +21,7 @@ pub struct Server<Listener, Service> {
 impl<Listener, Service> Server<Listener, Service>
 where
     Listener: listener::Listener,
-    Service: service::Service,
+    Service: service::Service<Listener::Socket>,
 {
     /// Create a new server that serves `service` to incoming connections from `listener`.
     pub fn new(listener: Listener, service: Service) -> Self {

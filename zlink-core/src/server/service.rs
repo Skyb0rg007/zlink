@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::{connection::Socket, Call, Connection, Reply};
 
 /// Service trait for handling method calls.
-pub trait Service {
+pub trait Service<Sock>
+where
+    Sock: Socket,
+{
     /// The type of method call that this service handles.
     ///
     /// This should be a type that can deserialize itself from a complete method call message: i-e
@@ -41,7 +44,7 @@ pub trait Service {
         Self: 'ser;
 
     /// Handle a method call.
-    fn handle<'ser, Sock: Socket>(
+    fn handle<'ser>(
         &'ser mut self,
         method: &'ser Call<Self::MethodCall<'_>>,
         conn: &mut Connection<Sock>,

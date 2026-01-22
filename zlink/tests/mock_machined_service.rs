@@ -302,14 +302,23 @@ mod server {
         Machined(MachinedError),
     }
 
-    impl Service for MockMachinedService {
+    impl<Sock> Service<Sock> for MockMachinedService
+    where
+        Sock: Socket,
+    {
         type MethodCall<'de> = Method<'de>;
-        type ReplyParams<'ser> = Reply<'ser>;
+        type ReplyParams<'ser>
+            = Reply<'ser>
+        where
+            Self: 'ser;
         type ReplyStream = futures_util::stream::Empty<zlink::Reply<()>>;
         type ReplyStreamParams = ();
-        type ReplyError<'ser> = MockError<'ser>;
+        type ReplyError<'ser>
+            = MockError<'ser>
+        where
+            Self: 'ser;
 
-        async fn handle<'service, Sock: Socket>(
+        async fn handle<'service>(
             &'service mut self,
             call: &'service Call<Self::MethodCall<'_>>,
             _conn: &mut Connection<Sock>,
