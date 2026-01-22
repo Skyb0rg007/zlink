@@ -187,14 +187,21 @@ impl Calculator {
 }
 
 // Implement the Service trait
-impl Service for Calculator {
+impl<Sock> Service<Sock> for Calculator
+where
+    Sock: Socket,
+{
     type MethodCall<'de> = CalculatorMethod;
-    type ReplyParams<'ser> = CalculatorReply<'ser>;
+    type ReplyParams<'ser> = CalculatorReply<'ser>
+    where
+        Self: 'ser;
     type ReplyStreamParams = ();
     type ReplyStream = futures_util::stream::Empty<zlink::Reply<()>>;
-    type ReplyError<'ser> = CalculatorError<'ser>;
+    type ReplyError<'ser> = CalculatorError<'ser>
+    where
+        Self: 'ser;
 
-    async fn handle<'service, Sock: Socket>(
+    async fn handle<'service>(
         &'service mut self,
         call: &'service Call<Self::MethodCall<'_>>,
         conn: &mut Connection<Sock>,

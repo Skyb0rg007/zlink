@@ -137,6 +137,8 @@ pub enum MachinedError {
     NotSupported,
     /// There is no IPC service (such as system bus or varlink) in the container.
     NoIPC,
+    /// Failed to fetch peer credentials.
+    FetchPeerCredentialsFailed,
 }
 
 impl core::fmt::Display for MachinedError {
@@ -157,6 +159,9 @@ impl core::fmt::Display for MachinedError {
             MachinedError::NotAvailable => write!(f, "Requested information is not available"),
             MachinedError::NotSupported => write!(f, "Requested operation is not supported"),
             MachinedError::NoIPC => write!(f, "There is no IPC service in the container"),
+            MachinedError::FetchPeerCredentialsFailed => {
+                write!(f, "Failed to fetch peer credentials")
+            }
         }
     }
 }
@@ -168,11 +173,15 @@ impl core::error::Error for MachinedError {}
 // ============================================================================
 
 #[cfg(feature = "server")]
+#[path = "creds-utils.rs"]
+mod creds_utils;
+
+#[cfg(feature = "server")]
 mod server {
     use super::*;
     use serde_prefix_all::prefix_all;
     use zlink::{
-        connection::Socket,
+        connection::{socket::FetchPeerCredentials, Socket},
         idl::{self, Comment, Interface, Parameter},
         service::MethodReply,
         varlink_service::{self, Error, Info, InterfaceDescription},
@@ -302,19 +311,41 @@ mod server {
         Machined(MachinedError),
     }
 
-    impl Service for MockMachinedService {
+    impl<Sock> Service<Sock> for MockMachinedService
+    where
+        Sock: Socket,
+        Sock::ReadHalf: FetchPeerCredentials,
+    {
         type MethodCall<'de> = Method<'de>;
-        type ReplyParams<'ser> = Reply<'ser>;
+        type ReplyParams<'ser>
+            = Reply<'ser>
+        where
+            Self: 'ser;
         type ReplyStream = futures_util::stream::Empty<zlink::Reply<()>>;
         type ReplyStreamParams = ();
-        type ReplyError<'ser> = MockError<'ser>;
+        type ReplyError<'ser>
+            = MockError<'ser>
+        where
+            Self: 'ser;
 
-        async fn handle<'service, Sock: Socket>(
+        async fn handle<'service>(
             &'service mut self,
             call: &'service Call<Self::MethodCall<'_>>,
-            _conn: &mut Connection<Sock>,
+            conn: &mut Connection<Sock>,
         ) -> MethodReply<Self::ReplyParams<'service>, Self::ReplyStream, Self::ReplyError<'service>>
         {
+            let Ok(creds) = conn.peer_credentials().await else {
+                return MethodReply::Error(MockError::Machined(
+                    MachinedError::FetchPeerCredentialsFailed,
+                ));
+            };
+            // Verify credentials match current process.
+            if creds_utils::verify_credentials(&creds).is_err() {
+                return MethodReply::Error(MockError::Machined(
+                    MachinedError::FetchPeerCredentialsFailed,
+                ));
+            }
+
             match call.method() {
                 Method::VarlinkService(varlink_service::Method::GetInfo) => {
                     // Return hardcoded info that matches the systemd machine service

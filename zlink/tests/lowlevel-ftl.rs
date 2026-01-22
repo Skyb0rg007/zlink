@@ -322,14 +322,20 @@ impl Ftl {
     }
 }
 
-impl Service for Ftl {
+impl<Sock: Socket> Service<Sock> for Ftl {
     type MethodCall<'de> = Method<'de>;
-    type ReplyParams<'ser> = Reply<'ser>;
+    type ReplyParams<'ser>
+        = Reply<'ser>
+    where
+        Self: 'ser;
     type ReplyStream = notified::Stream<Self::ReplyStreamParams>;
     type ReplyStreamParams = FtlReply<'static>;
-    type ReplyError<'ser> = ReplyError<'ser>;
+    type ReplyError<'ser>
+        = ReplyError<'ser>
+    where
+        Self: 'ser;
 
-    async fn handle<'service, Sock: Socket>(
+    async fn handle<'service>(
         &'service mut self,
         call: &'service Call<Self::MethodCall<'_>>,
         _conn: &mut Connection<Sock>,
