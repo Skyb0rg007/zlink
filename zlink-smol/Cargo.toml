@@ -9,9 +9,10 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["server", "proxy", "tracing"]
+default = ["service", "proxy", "tracing"]
 server = ["zlink-core/server"]
 proxy = ["zlink-core/proxy"]
+service = ["server", "zlink-core/service"]
 idl = ["zlink-core/idl"]
 idl-parse = ["zlink-core/idl-parse"]
 introspection = ["zlink-core/introspection"]

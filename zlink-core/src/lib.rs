@@ -47,6 +47,9 @@ pub mod varlink_service;
 #[cfg(feature = "proxy")]
 pub use zlink_macros::proxy;
 
+#[cfg(feature = "service")]
+pub use zlink_macros::service;
+
 pub use zlink_macros::ReplyError;
 
 #[cfg(feature = "std")]
