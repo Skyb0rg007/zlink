@@ -26,6 +26,11 @@ cargo check --all-features
 cargo check -p zlink-core --no-default-features --features idl-parse,proxy,defmt
 ```
 
+### Testing crates in isolation
+
+We only support running tests in isolation in `zlink`, `zlink-core` and `zlink-codegen` (e.g
+`cargo -p zlink-macros test` is not supported and allowed to fail).
+
 ### Git Hooks Setup
 ```bash
 # Enable git hooks for automatic formatting and clippy checks
