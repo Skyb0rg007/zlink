@@ -20,6 +20,9 @@ mod reply_error;
 #[cfg(feature = "proxy")]
 mod proxy;
 
+#[cfg(feature = "service")]
+mod service;
+
 /// Derives `Type` for structs and enums, generating appropriate `Type::Object` or `Type::Enum`
 /// representation.
 ///
@@ -983,4 +986,279 @@ pub fn proxy(
 #[proc_macro_derive(ReplyError, attributes(zlink))]
 pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     reply_error::derive_reply_error(input)
+}
+
+/// Transforms an impl block into a `Service` trait implementation.
+///
+/// **Requires the `service` feature to be enabled.**
+///
+/// This attribute macro takes a regular impl block and generates the necessary code to implement
+/// the `Service` trait, enabling the type to handle Varlink method calls.
+///
+/// # Supported Attributes
+///
+/// ## On the impl block:
+///
+/// * `crate = "path"` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
+///
+/// ## On methods:
+///
+/// * `#[zlink(interface = "...")]` - Set the interface name for this and subsequent methods.
+/// * `#[zlink(rename = "MethodName")]` - Custom Varlink method name.
+///
+/// ## On parameters:
+///
+/// * `#[zlink(rename = "paramName")]` - Custom serialized parameter name.
+/// * `#[zlink(connection)]` - Mark this parameter to receive a mutable reference to the connection.
+///   This is useful for accessing peer credentials or other connection-specific functionality.
+///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyService`).
+///
+/// # Generated Code
+///
+/// The macro generates:
+/// 1. A `{TypeName}MethodCall` enum for deserializing incoming method calls.
+/// 2. A `{TypeName}ReplyParams` enum for serializing outgoing replies.
+/// 3. A `{TypeName}ReplyError` combo enum that wraps all error types used by methods. This enum
+///    uses `#[serde(untagged)]` for transparent serialization.
+/// 4. An `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method.
+///
+/// # Error Handling
+///
+/// Methods can return `Result<T, E>` with any error type `E` that implements `Serialize` and
+/// `Debug`. Different methods can use different error types - the macro automatically generates a
+/// combo enum (`{TypeName}ReplyError`) that wraps all unique error types, with `From` impls for
+/// each type.
+///
+/// When a method returns `Err(e)`, the macro generates code that wraps it in the appropriate
+/// combo enum variant and returns `MethodReply::Error(...)`.
+/// When a method returns `Ok(v)`, it returns `MethodReply::Single(Some(v))`.
+///
+/// Methods can also return plain values (not wrapped in Result) - these are always treated as
+/// successful responses.
+///
+/// # Custom Socket Bounds
+///
+/// By default, the generated `Service` impl uses a generic socket parameter with just the `Socket`
+/// bound. If you need additional bounds (e.g., for peer credential checking), you can provide your
+/// own generics on the impl block:
+///
+/// ```rust
+/// use zlink::{service, connection::socket::FetchPeerCredentials};
+/// use serde::Serialize;
+///
+/// struct MyService;
+///
+/// #[derive(Debug, Serialize)]
+/// struct MyError;
+///
+/// #[service]
+/// impl<Sock> MyService
+/// where
+///     Sock::ReadHalf: FetchPeerCredentials,
+/// {
+///     #[zlink(interface = "org.example.service")]
+///     async fn get_status(&self) -> Result<(), MyError> {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// The first type parameter is used as the socket type for the generated `Service` impl. The
+/// `Socket` bound is automatically added, so you only need to specify additional bounds.
+///
+/// # Connection Parameter
+///
+/// Methods can receive a mutable reference to the connection using `#[zlink(connection)]`:
+///
+/// ```rust
+/// use zlink::{service, Connection, connection::socket::FetchPeerCredentials};
+/// use serde::Serialize;
+///
+/// struct MyService;
+///
+/// #[derive(Debug, Serialize)]
+/// struct MyError;
+///
+/// #[service]
+/// impl<Sock> MyService
+/// where
+///     Sock::ReadHalf: FetchPeerCredentials,
+/// {
+///     #[zlink(interface = "org.example.service")]
+///     async fn check_credentials(
+///         &self,
+///         #[zlink(connection)] conn: &mut Connection<Sock>,
+///     ) -> Result<(), MyError> {
+///         let _creds = conn.peer_credentials().await;
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// Methods with connection parameters are only callable through the `Service` trait (not directly
+/// on the type), since they require the socket type to be known.
+///
+/// # Example
+///
+/// ```rust
+/// use zlink::{
+///     service,
+///     unix::{bind, connect},
+///     Server,
+/// };
+/// use serde::{Deserialize, Serialize};
+///
+/// // Response type for balance operations.
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// struct Balance {
+///     amount: i64,
+/// }
+///
+/// // Error type - must derive zlink::ReplyError for proper serialization.
+/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError)]
+/// #[zlink(interface = "org.example.bank")]
+/// enum BankError {
+///     InsufficientFunds { available: i64, requested: i64 },
+///     InvalidAmount { amount: i64 },
+///     AccountLocked,
+/// }
+///
+/// struct BankAccount {
+///     balance: i64,
+///     locked: bool,
+/// }
+///
+/// impl BankAccount {
+///     fn new(initial_balance: i64) -> Self {
+///         Self { balance: initial_balance, locked: false }
+///     }
+/// }
+///
+/// // Service implementation with error handling.
+/// #[service]
+/// impl BankAccount {
+///     // Method that returns a plain value (not Result) - always succeeds.
+///     #[zlink(interface = "org.example.bank")]
+///     async fn get_balance(&self) -> Balance {
+///         Balance { amount: self.balance }
+///     }
+///
+///     // Method that can fail - returns Result<Balance, BankError>.
+///     async fn deposit(&mut self, amount: i64) -> Result<Balance, BankError> {
+///         if self.locked {
+///             return Err(BankError::AccountLocked);
+///         }
+///         if amount <= 0 {
+///             return Err(BankError::InvalidAmount { amount });
+///         }
+///         self.balance += amount;
+///         Ok(Balance { amount: self.balance })
+///     }
+///
+///     async fn withdraw(&mut self, amount: i64) -> Result<Balance, BankError> {
+///         if self.locked {
+///             return Err(BankError::AccountLocked);
+///         }
+///         if amount <= 0 {
+///             return Err(BankError::InvalidAmount { amount });
+///         }
+///         if amount > self.balance {
+///             return Err(BankError::InsufficientFunds {
+///                 available: self.balance,
+///                 requested: amount,
+///             });
+///         }
+///         self.balance -= amount;
+///         Ok(Balance { amount: self.balance })
+///     }
+///
+///     // Method returning Result<(), E> - void success, can fail.
+///     async fn lock_account(&mut self) -> Result<(), BankError> {
+///         if self.locked {
+///             return Err(BankError::AccountLocked);
+///         }
+///         self.locked = true;
+///         Ok(())
+///     }
+/// }
+///
+/// // Client-side proxy definition.
+/// #[zlink::proxy("org.example.bank")]
+/// trait BankProxy {
+///     async fn get_balance(&mut self) -> zlink::Result<Result<Balance, BankError>>;
+///     async fn deposit(&mut self, amount: i64) -> zlink::Result<Result<Balance, BankError>>;
+///     async fn withdraw(&mut self, amount: i64) -> zlink::Result<Result<Balance, BankError>>;
+///     async fn lock_account(&mut self) -> zlink::Result<Result<(), BankError>>;
+/// }
+///
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// // Server setup.
+/// let socket_path = "/tmp/zlink-service-example.sock";
+/// let _ = std::fs::remove_file(socket_path);
+/// let listener = bind(socket_path)?;
+/// let service = BankAccount::new(1000);
+/// let server = Server::new(listener, service);
+///
+/// // Run server and client concurrently.
+/// tokio::select! {
+///     res = server.run() => res?,
+///     res = async {
+///         let mut conn = connect(socket_path).await?;
+///
+///         // Check initial balance.
+///         let balance = conn.get_balance().await?.unwrap();
+///         assert_eq!(balance.amount, 1000);
+///
+///         // Successful deposit.
+///         let balance = conn.deposit(500).await?.unwrap();
+///         assert_eq!(balance.amount, 1500);
+///
+///         // Successful withdrawal.
+///         let balance = conn.withdraw(200).await?.unwrap();
+///         assert_eq!(balance.amount, 1300);
+///
+///         // Error: withdraw more than available.
+///         let err = conn.withdraw(5000).await?.unwrap_err();
+///         assert_eq!(err, BankError::InsufficientFunds { available: 1300, requested: 5000 });
+///
+///         // Error: invalid amount.
+///         let err = conn.deposit(-100).await?.unwrap_err();
+///         assert_eq!(err, BankError::InvalidAmount { amount: -100 });
+///
+///         // Lock account and verify subsequent operations fail.
+///         conn.lock_account().await?.unwrap();
+///         let err = conn.withdraw(100).await?.unwrap_err();
+///         assert_eq!(err, BankError::AccountLocked);
+///
+///         Ok::<(), Box<dyn std::error::Error>>(())
+///     } => res?,
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # })?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Method Name Conversion
+///
+/// By default, method names are converted from snake_case to PascalCase for the Varlink call.
+/// For example, `get_balance` becomes `GetBalance`. Use `#[zlink(rename = "...")]` to override
+/// this.
+///
+/// # Full Method Path
+///
+/// The full Varlink method path is constructed as `{interface}.{MethodName}`. For example,
+/// if the interface is `org.example.bank` and the method is `GetBalance`, the full path
+/// will be `org.example.bank.GetBalance`.
+///
+/// # Interface Propagation
+///
+/// Once an interface is set with `#[zlink(interface = "...")]`, it applies to that method and
+/// all subsequent methods until another interface attribute is encountered.
+#[cfg(feature = "service")]
+#[proc_macro_attribute]
+pub fn service(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    service::service(attr.into(), input.into()).into()
 }
