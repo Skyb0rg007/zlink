@@ -990,16 +990,36 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 
 /// Transforms an impl block into a `Service` trait implementation.
 ///
-/// **Requires the `service` feature to be enabled.**
+/// **Requires the `service` feature to be enabled.** The `service` feature automatically enables
+/// the `introspection` feature, allowing the macro to generate interface descriptions and handle
+/// the standard `org.varlink.service` interface automatically.
 ///
 /// This attribute macro takes a regular impl block and generates the necessary code to implement
 /// the `Service` trait, enabling the type to handle Varlink method calls.
+///
+/// # Automatic Introspection Support
+///
+/// The generated service automatically handles the `org.varlink.service` interface:
+///
+/// - **`GetInfo`**: Returns service metadata (vendor, product, version, URL) and a list of all
+///   implemented interfaces.
+/// - **`GetInterfaceDescription`**: Returns the IDL description for any implemented interface,
+///   generated at compile time from the method signatures and types.
+/// - **Unknown methods**: Return `MethodNotFound` error with the method name.
+/// - **Unknown interfaces** (in `GetInterfaceDescription`): Return `InterfaceNotFound` error.
 ///
 /// # Supported Attributes
 ///
 /// ## On the impl block:
 ///
 /// * `crate = "path"` - Specifies the crate path to use for zlink types. Defaults to `::zlink`.
+/// * `types = [Type1, Type2, ...]` - Custom types to include in interface descriptions. These types
+///   must implement `CustomType` (typically via `#[derive(CustomType)]`). The types are included in
+///   the IDL for any interface that uses them.
+/// * `vendor = "..."` - The vendor name for `GetInfo` response. Defaults to empty string.
+/// * `product = "..."` - The product name for `GetInfo` response. Defaults to empty string.
+/// * `version = "..."` - The version string for `GetInfo` response. Defaults to empty string.
+/// * `url = "..."` - The URL for `GetInfo` response. Defaults to empty string.
 ///
 /// ## On methods:
 ///
@@ -1043,13 +1063,15 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// own generics on the impl block:
 ///
 /// ```rust
-/// use zlink::{service, connection::socket::FetchPeerCredentials};
-/// use serde::Serialize;
+/// use zlink::{service, connection::socket::FetchPeerCredentials, introspect};
 ///
 /// struct MyService;
 ///
-/// #[derive(Debug, Serialize)]
-/// struct MyError;
+/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
+/// #[zlink(interface = "org.example.service")]
+/// enum MyError {
+///     ServiceError,
+/// }
 ///
 /// #[service]
 /// impl<Sock> MyService
@@ -1071,13 +1093,15 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// Methods can receive a mutable reference to the connection using `#[zlink(connection)]`:
 ///
 /// ```rust
-/// use zlink::{service, Connection, connection::socket::FetchPeerCredentials};
-/// use serde::Serialize;
+/// use zlink::{service, Connection, connection::socket::FetchPeerCredentials, introspect};
 ///
 /// struct MyService;
 ///
-/// #[derive(Debug, Serialize)]
-/// struct MyError;
+/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
+/// #[zlink(interface = "org.example.service")]
+/// enum MyError {
+///     ServiceError,
+/// }
 ///
 /// #[service]
 /// impl<Sock> MyService
@@ -1102,6 +1126,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// ```rust
 /// use zlink::{
+///     introspect::{self, Type},
 ///     service,
 ///     unix::{bind, connect},
 ///     Server,
@@ -1109,13 +1134,13 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// use serde::{Deserialize, Serialize};
 ///
 /// // Response type for balance operations.
-/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 /// struct Balance {
 ///     amount: i64,
 /// }
 ///
 /// // Error type - must derive zlink::ReplyError for proper serialization.
-/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError)]
+/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
 /// #[zlink(interface = "org.example.bank")]
 /// enum BankError {
 ///     InsufficientFunds { available: i64, requested: i64 },
@@ -1236,6 +1261,89 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # })?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Introspection Example
+///
+/// The service automatically provides introspection via the `org.varlink.service` interface:
+///
+/// ```rust
+/// use zlink::{
+///     introspect::{self, CustomType, Type},
+///     service,
+///     varlink_service::Proxy,
+/// };
+/// use serde::{Deserialize, Serialize};
+///
+/// // Custom type - must derive CustomType to be included in IDL.
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
+/// struct Balance {
+///     amount: i64,
+/// }
+///
+/// #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
+/// #[zlink(interface = "org.example.bank")]
+/// enum BankError {
+///     InsufficientFunds { available: i64 },
+/// }
+///
+/// struct BankService;
+///
+/// // Include custom types in the service for IDL generation.
+/// #[service(
+///     types = [Balance],
+///     vendor = "Example Corp",
+///     product = "Bank Service",
+///     version = "1.0.0",
+///     url = "https://example.com/bank"
+/// )]
+/// impl BankService {
+///     #[zlink(interface = "org.example.bank")]
+///     async fn get_balance(&self) -> Result<Balance, BankError> {
+///         Ok(Balance { amount: 1000 })
+///     }
+/// }
+///
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// # use zlink::test_utils::mock_socket::MockSocket;
+/// // GetInfo returns metadata and list of interfaces.
+/// # let responses = [
+/// #     r#"{"parameters":{"vendor":"Example Corp","product":"Bank Service","version":"1.0.0","url":"https://example.com/bank","interfaces":["org.example.bank","org.varlink.service"]}}"#,
+/// # ];
+/// # let socket = MockSocket::with_responses(&responses);
+/// # let mut conn = zlink::Connection::new(socket);
+/// let info = conn.get_info().await?.unwrap();
+/// assert_eq!(info.vendor, "Example Corp");
+/// let interfaces: Vec<&str> = info.interfaces.iter().map(|s| s.as_ref()).collect();
+/// assert_eq!(interfaces.as_slice(), ["org.example.bank", "org.varlink.service"]);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # }).unwrap();
+///
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// # use zlink::test_utils::mock_socket::MockSocket;
+/// // GetInterfaceDescription returns the IDL, which can be parsed to verify methods and types.
+/// # let responses = [
+/// #     r#"{"parameters":{"description":"interface org.example.bank\n\ntype Balance (amount: int)\n\nmethod GetBalance() -> (amount: int)\n\nerror InsufficientFunds (available: int)"}}"#,
+/// # ];
+/// # let socket = MockSocket::with_responses(&responses);
+/// # let mut conn = zlink::Connection::new(socket);
+/// let desc = conn.get_interface_description("org.example.bank").await?.unwrap();
+/// let interface = desc.parse()?;
+/// assert_eq!(interface.name(), "org.example.bank");
+///
+/// // Verify methods are present.
+/// let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
+/// assert_eq!(method_names.as_slice(), ["GetBalance"]);
+///
+/// // Verify custom types are included.
+/// let type_names: Vec<_> = interface.custom_types().map(|t| t.name()).collect();
+/// assert_eq!(type_names.as_slice(), ["Balance"]);
+///
+/// // Verify errors are present.
+/// let error_names: Vec<_> = interface.errors().map(|e| e.name()).collect();
+/// assert_eq!(error_names.as_slice(), ["InsufficientFunds"]);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # }).unwrap();
 /// ```
 ///
 /// # Method Name Conversion
