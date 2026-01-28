@@ -633,6 +633,17 @@ async fn service_macro_with_metadata() -> Result<(), Box<dyn std::error::Error>>
                 "Unexpected interfaces"
             );
 
+            // Test GetInterfaceDescription - verify both methods are exposed.
+            // This tests that the macro-level interface attribute applies to all methods.
+            let desc = conn.get_interface_description("org.example.metadata").await?.unwrap();
+            let interface = desc.parse()?;
+            let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
+            assert_eq!(
+                method_names.as_slice(),
+                ["Ping", "Pong"],
+                "Expected both Ping and Pong methods from macro-level interface attribute"
+            );
+
             Ok::<(), Box<dyn std::error::Error>>(())
         } => res?,
     }
@@ -644,13 +655,17 @@ async fn service_macro_with_metadata() -> Result<(), Box<dyn std::error::Error>>
 /// This is `pub` to test that the generated types work with public service structs (issue #216).
 pub struct MetadataService;
 
+// Test the interface attribute at the macro level instead of on each method.
 #[zlink::service(
+    interface = "org.example.metadata",
     vendor = "Test Vendor",
     product = "Test Product",
     version = "1.0.0",
     url = "https://example.com"
 )]
 impl MetadataService {
-    #[zlink(interface = "org.example.metadata")]
     async fn ping(&self) {}
+
+    // Add another method to verify all methods get the interface.
+    async fn pong(&self) {}
 }
