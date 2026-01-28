@@ -1035,19 +1035,14 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// # Generated Code
 ///
-/// The macro generates:
-/// 1. A `{TypeName}MethodCall` enum for deserializing incoming method calls.
-/// 2. A `{TypeName}ReplyParams` enum for serializing outgoing replies.
-/// 3. A `{TypeName}ReplyError` combo enum that wraps all error types used by methods. This enum
-///    uses `#[serde(untagged)]` for transparent serialization.
-/// 4. An `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method.
+/// The macro generates an `impl<Sock: Socket> Service<Sock> for YourType` with the `handle` method,
+/// along with internal helper types for serialization/deserialization.
 ///
 /// # Error Handling
 ///
 /// Methods can return `Result<T, E>` with any error type `E` that implements `Serialize` and
-/// `Debug`. Different methods can use different error types - the macro automatically generates a
-/// combo enum (`{TypeName}ReplyError`) that wraps all unique error types, with `From` impls for
-/// each type.
+/// `Debug`. Different methods can use different error types - the macro automatically generates
+/// internal wrapper types to handle all unique error types.
 ///
 /// When a method returns `Err(e)`, the macro generates code that wraps it in the appropriate
 /// combo enum variant and returns `MethodReply::Error(...)`.

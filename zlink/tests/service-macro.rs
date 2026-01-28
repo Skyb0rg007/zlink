@@ -641,7 +641,8 @@ async fn service_macro_with_metadata() -> Result<(), Box<dyn std::error::Error>>
 }
 
 /// A simple service with metadata attributes.
-struct MetadataService;
+/// This is `pub` to test that the generated types work with public service structs (issue #216).
+pub struct MetadataService;
 
 #[zlink::service(
     vendor = "Test Vendor",
