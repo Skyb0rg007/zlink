@@ -15,7 +15,7 @@ proc-macro = true
 default = ["proxy"]
 std = []
 proxy = ["syn/full", "syn/clone-impls"]
-service = ["syn/full", "syn/clone-impls"]
+service = ["syn/full", "syn/clone-impls", "introspection"]
 idl-parse = []
 introspection = []
 

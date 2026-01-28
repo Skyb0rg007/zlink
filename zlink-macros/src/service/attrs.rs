@@ -2,18 +2,36 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse::Parser, Error, ItemImpl};
+use syn::{
+    parse::{Parse, Parser},
+    Error, ItemImpl,
+};
 
 /// Attributes parsed from the `#[service(...)]` macro invocation.
 pub(super) struct ServiceAttrs {
     /// The crate path to use (defaults to `::zlink`).
     pub crate_path: TokenStream,
+    /// Custom types for introspection.
+    pub custom_types: Vec<syn::Type>,
+    /// Service vendor name.
+    pub vendor: Option<String>,
+    /// Service product name.
+    pub product: Option<String>,
+    /// Service version.
+    pub version: Option<String>,
+    /// Service URL.
+    pub url: Option<String>,
 }
 
 impl ServiceAttrs {
     /// Parse attributes from the macro attribute token stream.
     pub(super) fn parse(attr: &TokenStream, item_impl: &ItemImpl) -> Result<Self, Error> {
         let mut crate_path = None;
+        let mut custom_types = Vec::new();
+        let mut vendor = None;
+        let mut product = None;
+        let mut version = None;
+        let mut url = None;
 
         if !attr.is_empty() {
             let parser = syn::meta::parser(|meta| {
@@ -21,6 +39,25 @@ impl ServiceAttrs {
                     let value: syn::LitStr = meta.value()?.parse()?;
                     let path_str = value.value();
                     crate_path = Some(syn::parse_str(&path_str)?);
+                } else if meta.path.is_ident("types") {
+                    // Parse types = [Type1, Type2, ...]
+                    meta.input.parse::<syn::Token![=]>()?;
+                    let content;
+                    syn::bracketed!(content in meta.input);
+                    let types = content.parse_terminated(syn::Type::parse, syn::Token![,])?;
+                    custom_types = types.into_iter().collect();
+                } else if meta.path.is_ident("vendor") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    vendor = Some(value.value());
+                } else if meta.path.is_ident("product") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    product = Some(value.value());
+                } else if meta.path.is_ident("version") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    version = Some(value.value());
+                } else if meta.path.is_ident("url") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    url = Some(value.value());
                 } else {
                     return Err(meta.error("unsupported service attribute"));
                 }
@@ -32,7 +69,9 @@ impl ServiceAttrs {
                     item_impl,
                     format!(
                         "failed to parse service attributes: {e}. Expected: \
-                         #[service] or #[service(crate = \"path\")]"
+                         #[service], #[service(crate = \"path\")], \
+                         #[service(types = [T1, T2], vendor = \"...\", product = \"...\", \
+                         version = \"...\", url = \"...\")]"
                     ),
                 )
             })?;
@@ -40,6 +79,11 @@ impl ServiceAttrs {
 
         Ok(Self {
             crate_path: crate_path.unwrap_or_else(|| quote! { ::zlink }),
+            custom_types,
+            vendor,
+            product,
+            version,
+            url,
         })
     }
 }
