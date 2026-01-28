@@ -661,7 +661,7 @@ fn generate_handle_body(
                 {
                     #(#conn_bindings)*
                     #(#param_bindings)*
-                    async #body
+                    async move #body
                 }.await
             }
         } else {

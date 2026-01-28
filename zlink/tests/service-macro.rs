@@ -209,8 +209,10 @@ async fn service_macro_with_custom_socket_bounds() -> Result<(), Box<dyn std::er
         res = async {
             let mut conn = connect(socket_path).await?;
             // Test that the service works and can check credentials.
-            let reply = conn.get_balance_with_creds().await?.unwrap();
-            assert_eq!(reply.amount, 1000);
+            // The multiplier parameter is used AFTER an await point in the service method,
+            // which tests the fix for issue #216 (parameters with #[zlink(connection)]).
+            let reply = conn.get_balance_with_creds(2).await?.unwrap();
+            assert_eq!(reply.amount, 2000); // 1000 * 2
             Ok::<(), Box<dyn std::error::Error>>(())
         } => res?,
     }
@@ -241,21 +243,28 @@ where
     #[zlink(interface = "org.example.creds")]
     async fn get_balance_with_creds(
         &self,
+        multiplier: i64,
         #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
     ) -> Result<Balance, CredsError> {
         // Actually check credentials using the connection parameter.
         let creds = conn.peer_credentials().await.unwrap();
         // Verify we got valid credentials (check that unix_user_id is returned).
         let _ = creds.unix_user_id();
+        // Use multiplier AFTER the await point - this tests the fix for issue #216.
+        // Without `async move`, the multiplier would be captured by reference and not live long
+        // enough.
         Ok(Balance {
-            amount: self.balance,
+            amount: self.balance * multiplier,
         })
     }
 }
 
 #[zlink::proxy("org.example.creds")]
 trait CredsProxy {
-    async fn get_balance_with_creds(&mut self) -> zlink::Result<Result<Balance, CredsError>>;
+    async fn get_balance_with_creds(
+        &mut self,
+        multiplier: i64,
+    ) -> zlink::Result<Result<Balance, CredsError>>;
 }
 
 // ============================================================================
