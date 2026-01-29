@@ -33,7 +33,7 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
 
     // Process methods and collect method information.
     let mut methods_info = Vec::new();
-    let mut current_interface: Option<String> = None;
+    let mut current_interface: Option<String> = service_attrs.interface.clone();
 
     for item in &mut item_impl.items {
         let ImplItem::Fn(method) = item else {
@@ -55,7 +55,8 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
     if methods_info.iter().all(|m| m.interface.is_none()) {
         return Err(Error::new_spanned(
             &item_impl,
-            "at least one method must have an interface specified via #[zlink(interface = \"...\")]",
+            "an interface must be specified via #[zlink::service(interface = \"...\")] or \
+             #[zlink(interface = \"...\")] on the first method",
         ));
     }
 

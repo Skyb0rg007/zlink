@@ -56,11 +56,12 @@ pub(super) fn generate_service_impl(
     let self_ty = &item_impl.self_ty;
 
     // Extract the type name for generating auxiliary type names.
+    // All generated types use `__` prefix to indicate they are internal implementation details.
     let type_name = extract_type_name(self_ty).unwrap_or_else(|| "Service".to_string());
-    let method_call_name = format_ident!("{}MethodCall", type_name);
+    let method_call_name = format_ident!("__{}MethodCall", type_name);
     let user_methods_name = format_ident!("__{}UserMethods", type_name);
-    let reply_params_name = format_ident!("{}ReplyParams", type_name);
-    let reply_error_name = format_ident!("{}ReplyError", type_name);
+    let reply_params_name = format_ident!("__{}ReplyParams", type_name);
+    let reply_error_name = format_ident!("__{}ReplyError", type_name);
 
     // Collect interfaces for introspection.
     let interfaces = collect_interfaces(methods_info);
@@ -238,23 +239,22 @@ fn generate_method_call_enum(
     // Generate the inner user methods enum.
     let user_methods_enum = if variants.is_empty() {
         quote! {
+            #[allow(private_interfaces)]
             #[derive(::core::fmt::Debug, ::serde::Deserialize)]
             #[serde(tag = "method", content = "parameters")]
-            enum #user_methods_name<'__de> {
-                #[doc(hidden)]
+            pub enum #user_methods_name<'__de> {
                 #unused_variant(::core::marker::PhantomData<&'__de ()>),
             }
         }
     } else {
         // Note: #[serde(other)] must be on the last variant.
         quote! {
+            #[allow(private_interfaces)]
             #[derive(::core::fmt::Debug, ::serde::Deserialize)]
             #[serde(tag = "method", content = "parameters")]
-            enum #user_methods_name<'__de> {
-                #[doc(hidden)]
+            pub enum #user_methods_name<'__de> {
                 #unused_variant(::core::marker::PhantomData<&'__de ()>),
                 #(#variants,)*
-                #[doc(hidden)]
                 #[serde(other)]
                 #unknown_variant,
             }
@@ -264,9 +264,10 @@ fn generate_method_call_enum(
     // Generate the outer untagged wrapper enum.
     // VarlinkService is tried first (specific matches only), then UserMethods.
     let outer_enum = quote! {
+        #[allow(private_interfaces)]
         #[derive(::core::fmt::Debug, ::serde::Deserialize)]
         #[serde(untagged)]
-        enum #enum_name<'__de> {
+        pub enum #enum_name<'__de> {
             #[serde(borrow)]
             __VarlinkService(#crate_path::varlink_service::Method<'__de>),
             __UserMethods(#user_methods_name<'__de>),
@@ -369,9 +370,10 @@ fn generate_reply_error_enum(
     let varlink_error_variant = format_ident!("__{}VarlinkService", enum_name);
 
     let enum_def = quote! {
+        #[allow(private_interfaces)]
         #[derive(::core::fmt::Debug, ::serde::Serialize)]
         #[serde(untagged)]
-        enum #enum_name<'__ser> {
+        pub enum #enum_name<'__ser> {
             #varlink_error_variant(#crate_path::varlink_service::Error<'__ser>),
             #(#variants,)*
         }
@@ -428,23 +430,23 @@ fn generate_reply_params_enum(
 
     if variants.is_empty() {
         return Ok(quote! {
+            #[allow(private_interfaces)]
             #[derive(::core::fmt::Debug, ::serde::Serialize)]
             #[serde(untagged)]
-            enum #enum_name<'__ser> {
+            pub enum #enum_name<'__ser> {
                 #varlink_reply_variant(#crate_path::varlink_service::Reply<'__ser>),
-                #[doc(hidden)]
                 #unused_variant(::core::marker::PhantomData<&'__ser ()>),
             }
         });
     }
 
     Ok(quote! {
+        #[allow(private_interfaces)]
         #[derive(::core::fmt::Debug, ::serde::Serialize)]
         #[serde(untagged)]
-        enum #enum_name<'__ser> {
+        pub enum #enum_name<'__ser> {
             #varlink_reply_variant(#crate_path::varlink_service::Reply<'__ser>),
             #(#variants,)*
-            #[doc(hidden)]
             #unused_variant(::core::marker::PhantomData<&'__ser ()>),
         }
     })
@@ -661,7 +663,7 @@ fn generate_handle_body(
                 {
                     #(#conn_bindings)*
                     #(#param_bindings)*
-                    async #body
+                    async move #body
                 }.await
             }
         } else {
