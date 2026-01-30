@@ -66,6 +66,7 @@ where
     pub fn stream(&self) -> Stream<ReplyParams> {
         Stream(Box::pin(StreamInner::Broadcast {
             receiver: self.inactive_rx.activate_cloned(),
+            cached: None,
         }))
     }
 }
@@ -130,14 +131,22 @@ where
         let this = self.get_mut();
         // Project through the Pin<Box<StreamInner>> to the receivers
         match this.0.as_mut().project() {
-            StreamInnerProj::Broadcast { receiver } => {
-                match futures_util::ready!(receiver.poll_next(cx)) {
-                    Some(reply) => {
-                        Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(true))))
-                    }
-                    None => Poll::Ready(None),
+            StreamInnerProj::Broadcast {
+                mut receiver,
+                cached,
+            } => match futures_util::ready!(receiver.as_mut().poll_next(cx)) {
+                Some(reply) => {
+                    // Cache and yield immediately with continues=true.
+                    *cached = Some(reply.clone());
+                    Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(true))))
                 }
-            }
+                // Channel closed - yield cached value with continues=false.
+                None => Poll::Ready(
+                    cached
+                        .take()
+                        .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
+                ),
+            },
             StreamInnerProj::Oneshot {
                 receiver,
                 terminated,
@@ -165,6 +174,7 @@ pin_project! {
         Broadcast {
             #[pin]
             receiver: BroadcastReceiver<ReplyParams>,
+            cached: Option<ReplyParams>,
         },
         Oneshot {
             #[pin]

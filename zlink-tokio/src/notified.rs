@@ -44,7 +44,10 @@ where
 
     /// Get a stream of replies for the notified field.
     pub fn stream(&self) -> Stream<ReplyParams> {
-        Stream(StreamInner::Broadcast(self.tx.subscribe().into()))
+        Stream(StreamInner::Broadcast {
+            stream: self.tx.subscribe().into(),
+            cached: None,
+        })
     }
 }
 
@@ -64,7 +67,7 @@ where
     pub fn new() -> (Self, Stream<ReplyParams>) {
         let (tx, rx) = oneshot::channel();
 
-        (Self { tx }, Stream(StreamInner::Oneshot(rx)))
+        (Self { tx }, Stream(StreamInner::Oneshot { receiver: rx }))
     }
 
     /// Set the value of the notified field and notify all listeners.
@@ -85,33 +88,39 @@ pub struct Stream<ReplyParams>(StreamInner<ReplyParams>);
 
 impl<ReplyParams> futures_util::Stream for Stream<ReplyParams>
 where
-    ReplyParams: Clone + Send + 'static,
+    ReplyParams: Clone + Send + Unpin + 'static,
 {
     type Item = Reply<ReplyParams>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match &mut self.0 {
-            StreamInner::Broadcast(stream) => {
-                let reply = loop {
-                    match ready!(Pin::new(&mut *stream).poll_next(cx)) {
-                        Some(Ok(reply)) => {
-                            break Some(Reply::new(Some(reply)).set_continues(Some(true)));
-                        }
-                        // Some intermediate values were missed. That's OK, as long as we get the
-                        // latest value.
-                        Some(Err(_)) => continue,
-                        None => break None,
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match &mut this.0 {
+            StreamInner::Broadcast { stream, cached } => loop {
+                match ready!(Pin::new(&mut *stream).poll_next(cx)) {
+                    Some(Ok(reply)) => {
+                        // Cache and yield immediately with continues=true.
+                        *cached = Some(reply.clone());
+                        break Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(true))));
                     }
-                };
-
-                Poll::Ready(reply)
-            }
-            StreamInner::Oneshot(stream) => {
-                if stream.is_terminated() {
+                    // Some intermediate values were missed. That's OK, as long as we get the
+                    // latest value.
+                    Some(Err(_)) => continue,
+                    // Channel closed - yield cached value with continues=false.
+                    None => {
+                        break Poll::Ready(
+                            cached
+                                .take()
+                                .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
+                        )
+                    }
+                }
+            },
+            StreamInner::Oneshot { receiver } => {
+                if receiver.is_terminated() {
                     return Poll::Ready(None);
                 }
 
-                Pin::new(&mut *stream).poll(cx).map(|reply| {
+                Pin::new(&mut *receiver).poll(cx).map(|reply| {
                     reply
                         .map(|reply| Reply::new(Some(reply)).set_continues(Some(false)))
                         .ok()
@@ -123,6 +132,11 @@ where
 
 #[derive(Debug)]
 enum StreamInner<ReplyParams> {
-    Broadcast(BroadcastStream<ReplyParams>),
-    Oneshot(oneshot::Receiver<ReplyParams>),
+    Broadcast {
+        stream: BroadcastStream<ReplyParams>,
+        cached: Option<ReplyParams>,
+    },
+    Oneshot {
+        receiver: oneshot::Receiver<ReplyParams>,
+    },
 }
