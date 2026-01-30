@@ -29,6 +29,7 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 tokio-stream = { version = "0.1.17", default-features = false, features = [
     "sync",
 ] }
+pin-project-lite = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1.44.0", features = [
