@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{Error, GenericParam, ItemImpl, Type};
 
 use super::{attrs::ServiceAttrs, method::MethodInfo};
@@ -15,9 +15,14 @@ struct HandleBodyContext<'a> {
     user_methods_name: &'a Ident,
     reply_params_name: &'a Ident,
     reply_error_name: &'a Ident,
+    reply_stream_params_name: &'a Ident,
+    reply_stream_name: &'a Ident,
     error_type_map: &'a HashMap<String, usize>,
+    stream_item_type_map: &'a HashMap<String, Ident>,
     interfaces: &'a [String],
     type_name: &'a str,
+    /// Whether streaming methods require boxing (any uses `impl Trait`).
+    needs_stream_boxing: bool,
 }
 
 /// Extract a simple type name from a Type for generating auxiliary type names.
@@ -62,6 +67,8 @@ pub(super) fn generate_service_impl(
     let user_methods_name = format_ident!("__{}UserMethods", type_name);
     let reply_params_name = format_ident!("__{}ReplyParams", type_name);
     let reply_error_name = format_ident!("__{}ReplyError", type_name);
+    let reply_stream_params_name = format_ident!("__{}ReplyStreamParams", type_name);
+    let reply_stream_name = format_ident!("__{}ReplyStream", type_name);
 
     // Collect interfaces for introspection.
     let interfaces = collect_interfaces(methods_info);
@@ -99,6 +106,15 @@ pub(super) fn generate_service_impl(
         &type_name,
     );
 
+    // Generate the ReplyStreamParams enum for streaming methods.
+    let (reply_stream_params_enum, stream_item_type_map) =
+        generate_reply_stream_params_enum(methods_info, &reply_stream_params_name);
+
+    // Check if any streaming method uses `impl Trait` (requires boxing).
+    let needs_stream_boxing = methods_info
+        .iter()
+        .any(|m| m.is_streaming && m.stream_uses_impl_trait);
+
     // Generate the `handle` method body.
     let handle_body_ctx = HandleBodyContext {
         crate_path,
@@ -106,9 +122,13 @@ pub(super) fn generate_service_impl(
         user_methods_name: &user_methods_name,
         reply_params_name: &reply_params_name,
         reply_error_name: &reply_error_name,
+        reply_stream_params_name: &reply_stream_params_name,
+        reply_stream_name: &reply_stream_name,
         error_type_map: &error_type_map,
+        stream_item_type_map: &stream_item_type_map,
         interfaces: &interfaces,
         type_name: &type_name,
+        needs_stream_boxing,
     };
     let handle_body = generate_handle_body(methods_info, service_attrs, &handle_body_ctx)?;
 
@@ -144,6 +164,49 @@ pub(super) fn generate_service_impl(
             #user_predicates
     };
 
+    // Check for streaming methods and determine stream types.
+    let has_streaming_methods = methods_info.iter().any(|m| m.is_streaming);
+
+    // Generate the ReplyStream type and enum (if using concrete types).
+    let (reply_stream_type, reply_stream_params_type, reply_stream_enum) = if has_streaming_methods
+    {
+        if needs_stream_boxing {
+            // Use boxing when any streaming method uses `impl Trait`.
+            (
+                quote! {
+                    ::std::boxed::Box<
+                        dyn ::futures_util::Stream<
+                                Item = #crate_path::Reply<#reply_stream_params_name>
+                            > + ::core::marker::Unpin
+                    >
+                },
+                quote! { #reply_stream_params_name },
+                quote! {},
+            )
+        } else {
+            // Generate an enum stream type when all methods return concrete types.
+            let reply_stream_enum = generate_reply_stream_enum(
+                methods_info,
+                &reply_stream_name,
+                &reply_stream_params_name,
+                &stream_item_type_map,
+                crate_path,
+            );
+            (
+                quote! { #reply_stream_name },
+                quote! { #reply_stream_params_name },
+                reply_stream_enum,
+            )
+        }
+    } else {
+        // No streaming methods - use empty stream.
+        (
+            quote! { ::futures_util::stream::Empty<#crate_path::Reply<()>> },
+            quote! { () },
+            quote! {},
+        )
+    };
+
     // Generate the impl block.
     let service_impl = quote! {
         impl #generics #crate_path::Service<#socket_ty> for #self_ty
@@ -151,8 +214,8 @@ pub(super) fn generate_service_impl(
         {
             type MethodCall<'de> = #method_call_name<'de>;
             type ReplyParams<'ser> = #reply_params_name<'ser> where Self: 'ser;
-            type ReplyStream = ::futures_util::stream::Empty<#crate_path::Reply<()>>;
-            type ReplyStreamParams = ();
+            type ReplyStream = #reply_stream_type;
+            type ReplyStreamParams = #reply_stream_params_type;
             type ReplyError<'ser> = #error_type where Self: 'ser;
 
             async fn handle<'__zlink_ser>(
@@ -175,6 +238,10 @@ pub(super) fn generate_service_impl(
         #method_call_enum
 
         #reply_params_enum
+
+        #reply_stream_params_enum
+
+        #reply_stream_enum
 
         #reply_error_enum
 
@@ -293,7 +360,7 @@ fn build_return_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String,
         };
 
         // Use a simple string representation to check for duplicates.
-        let type_str = quote!(#return_type).to_string();
+        let type_str = return_type.to_token_stream().to_string();
         if let std::collections::hash_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
             e.insert(variant_idx);
             variant_idx += 1;
@@ -315,10 +382,38 @@ fn build_error_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, 
         };
 
         // Use a simple string representation to check for duplicates.
-        let type_str = quote!(#error_type).to_string();
+        let type_str = error_type.to_token_stream().to_string();
         if let std::collections::hash_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
             e.insert(variant_idx);
             variant_idx += 1;
+        }
+    }
+
+    type_to_variant
+}
+
+/// Build a mapping from stream item type string representation to variant name.
+/// This ensures consistent variant naming for the stream params enum.
+fn build_stream_item_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, Ident> {
+    let mut type_to_variant: HashMap<String, Ident> = HashMap::new();
+
+    for method in methods_info {
+        if !method.is_streaming {
+            continue;
+        }
+
+        let Some(ref stream_item_type) = method.stream_item_type else {
+            continue;
+        };
+
+        // Use a simple string representation to check for duplicates.
+        let type_str = stream_item_type.to_token_stream().to_string();
+        if let std::collections::hash_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
+            // Use the type name as the variant name.
+            let variant_name = extract_type_name(stream_item_type)
+                .map(|name| format_ident!("{}", name))
+                .unwrap_or_else(|| format_ident!("__Unknown"));
+            e.insert(variant_name);
         }
     }
 
@@ -348,7 +443,7 @@ fn generate_reply_error_enum(
             let Some(ref error_type) = method.error_type else {
                 continue;
             };
-            if &quote!(#error_type).to_string() == type_str {
+            if &error_type.to_token_stream().to_string() == type_str {
                 let variant_name = format_ident!("__{}Variant{}", enum_name, idx);
                 variants.push(quote! {
                     #variant_name(#error_type)
@@ -392,6 +487,149 @@ fn generate_reply_error_enum(
     (enum_def, error_type_map)
 }
 
+/// Generate the ReplyStreamParams enum for streaming method replies.
+/// Returns the enum definition, From impls, and the type map.
+fn generate_reply_stream_params_enum(
+    methods_info: &[MethodInfo],
+    enum_name: &Ident,
+) -> (TokenStream, HashMap<String, Ident>) {
+    let type_map = build_stream_item_type_variant_map(methods_info);
+
+    let mut variants: Vec<TokenStream> = Vec::new();
+    let mut from_impls: Vec<TokenStream> = Vec::new();
+
+    for (type_str, variant_name) in &type_map {
+        // Find the actual stream item type from methods.
+        for method in methods_info {
+            if !method.is_streaming {
+                continue;
+            }
+            let Some(ref item_type) = method.stream_item_type else {
+                continue;
+            };
+            if &item_type.to_token_stream().to_string() == type_str {
+                variants.push(quote! {
+                    #variant_name(#item_type)
+                });
+
+                from_impls.push(quote! {
+                    impl ::core::convert::From<#item_type> for #enum_name {
+                        fn from(v: #item_type) -> Self {
+                            #enum_name::#variant_name(v)
+                        }
+                    }
+                });
+                break;
+            }
+        }
+    }
+
+    // If no streaming methods, generate an empty enum with a unit variant.
+    if variants.is_empty() {
+        let enum_def = quote! {
+            #[allow(private_interfaces)]
+            #[derive(::core::fmt::Debug, ::serde::Serialize)]
+            #[serde(untagged)]
+            pub enum #enum_name {
+                __Unused(()),
+            }
+        };
+        return (enum_def, type_map);
+    }
+
+    let enum_def = quote! {
+        #[allow(private_interfaces)]
+        #[derive(::core::fmt::Debug, ::serde::Serialize)]
+        #[serde(untagged)]
+        pub enum #enum_name {
+            #(#variants,)*
+        }
+
+        #(#from_impls)*
+    };
+
+    (enum_def, type_map)
+}
+
+/// Generate the ReplyStream enum for concrete stream types (using pin-project-lite).
+/// This avoids boxing when all streaming methods return concrete types.
+fn generate_reply_stream_enum(
+    methods_info: &[MethodInfo],
+    enum_name: &Ident,
+    reply_stream_params_name: &Ident,
+    stream_item_type_map: &HashMap<String, Ident>,
+    crate_path: &TokenStream,
+) -> TokenStream {
+    let projection_name = format_ident!("{}Proj", enum_name);
+
+    // Collect streaming methods with their return types and variant names.
+    let streaming_methods: Vec<_> = methods_info
+        .iter()
+        .filter(|m| m.is_streaming && m.stream_return_type.is_some())
+        .collect();
+
+    if streaming_methods.is_empty() {
+        return quote! {};
+    }
+
+    // Generate enum variants (one per streaming method, using method's varlink name).
+    let variants: Vec<TokenStream> = streaming_methods
+        .iter()
+        .map(|method| {
+            let variant_name = format_ident!("{}", method.varlink_name);
+            let stream_type = method.stream_return_type.as_ref().unwrap();
+            quote! {
+                #variant_name { #[pin] stream: #stream_type }
+            }
+        })
+        .collect();
+
+    // Generate poll_next match arms.
+    let poll_arms: Vec<TokenStream> = streaming_methods
+        .iter()
+        .map(|method| {
+            let variant_name = format_ident!("{}", method.varlink_name);
+            let item_type = method.stream_item_type.as_ref().unwrap();
+            let type_str = item_type.to_token_stream().to_string();
+            let params_variant = stream_item_type_map
+                .get(&type_str)
+                .cloned()
+                .unwrap_or_else(|| format_ident!("__Unknown"));
+
+            quote! {
+                #projection_name::#variant_name { stream } => {
+                    stream.poll_next(cx).map(|opt| opt.map(|reply| {
+                        reply.map(|params| #reply_stream_params_name::#params_variant(params))
+                    }))
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        #crate_path::pin_project_lite::pin_project! {
+            #[allow(private_interfaces)]
+            #[project = #projection_name]
+            pub enum #enum_name {
+                #(#variants,)*
+            }
+        }
+
+        impl ::futures_util::Stream for #enum_name {
+            type Item = #crate_path::Reply<#reply_stream_params_name>;
+
+            fn poll_next(
+                self: ::core::pin::Pin<&mut Self>,
+                cx: &mut ::core::task::Context<'_>,
+            ) -> ::core::task::Poll<::core::option::Option<Self::Item>> {
+                match self.project() {
+                    #(#poll_arms)*
+                }
+            }
+        }
+    }
+}
+
 /// Generate the ReplyParams enum for serializing outgoing replies.
 fn generate_reply_params_enum(
     methods_info: &[MethodInfo],
@@ -413,7 +651,7 @@ fn generate_reply_params_enum(
             let Some(ref return_type) = method.return_type else {
                 continue;
             };
-            if &quote!(#return_type).to_string() == type_str {
+            if &return_type.to_token_stream().to_string() == type_str {
                 let variant_name = format_ident!("__{}Variant{}", method_call_name, idx);
                 variants.push(quote! {
                     #variant_name(#return_type)
@@ -555,7 +793,7 @@ fn generate_interface_descriptions(
             .filter(|m| m.interface.as_ref() == Some(interface))
             .filter_map(|m| m.error_type.as_ref())
             .filter(|err_ty| {
-                let type_str = quote!(#err_ty).to_string();
+                let type_str = err_ty.to_token_stream().to_string();
                 seen_error_types.insert(type_str)
             })
             .map(|err_ty| {
@@ -605,9 +843,13 @@ fn generate_handle_body(
         user_methods_name,
         reply_params_name,
         reply_error_name,
+        reply_stream_params_name,
+        reply_stream_name,
         error_type_map,
+        stream_item_type_map,
         interfaces,
         type_name,
+        needs_stream_boxing,
     } = ctx;
 
     let mut user_match_arms: Vec<TokenStream> = Vec::new();
@@ -650,11 +892,22 @@ fn generate_handle_body(
                 })
                 .collect();
 
+            // Set up bindings for the `more` param (from call request).
+            let more_bindings: Vec<TokenStream> = method
+                .params
+                .iter()
+                .filter(|p| p.is_more)
+                .map(|p| {
+                    let name = &p.name;
+                    quote! { let #name = __zlink_call.more(); }
+                })
+                .collect();
+
             // Set up bindings for regular params (clone from pattern match).
             let param_bindings: Vec<TokenStream> = method
                 .params
                 .iter()
-                .filter(|p| !p.is_connection)
+                .filter(|p| !p.is_connection && !p.is_more)
                 .map(|p| {
                     let name = &p.name;
                     quote! { let #name = ::core::clone::Clone::clone(#name); }
@@ -664,18 +917,25 @@ fn generate_handle_body(
             quote! {
                 {
                     #(#conn_bindings)*
+                    #(#more_bindings)*
                     #(#param_bindings)*
                     async move #body
                 }.await
             }
         } else {
-            // Build the method call arguments, cloning values from the pattern match.
+            // Build the method call arguments.
             let call_args: Vec<TokenStream> = method
                 .params
                 .iter()
                 .map(|p| {
-                    let name = &p.name;
-                    quote! { ::core::clone::Clone::clone(#name) }
+                    if p.is_more {
+                        // `more` param comes from the call request.
+                        quote! { __zlink_call.more() }
+                    } else {
+                        // Clone from the pattern match.
+                        let name = &p.name;
+                        quote! { ::core::clone::Clone::clone(#name) }
+                    }
                 })
                 .collect();
 
@@ -683,17 +943,62 @@ fn generate_handle_body(
         };
 
         // Build the return expression based on method type.
-        let return_expr = if method.returns_result {
+        let return_expr = if method.is_streaming {
+            // Streaming method - wrap the stream to convert items to the enum type.
+            // The stream produces Reply<T> items, we map to Reply<ReplyStreamParams>.
+            let item_type = method
+                .stream_item_type
+                .as_ref()
+                .expect("streaming method must have stream_item_type");
+
+            // Get the variant name for this stream item type.
+            let type_str = item_type.to_token_stream().to_string();
+            let stream_variant_name = stream_item_type_map
+                .get(&type_str)
+                .cloned()
+                .unwrap_or_else(|| format_ident!("__Unknown"));
+
+            // Use the method's varlink name for the enum variant.
+            let method_variant_name = format_ident!("{}", method.varlink_name);
+
+            if *needs_stream_boxing {
+                // Use boxing when any streaming method uses `impl Trait`.
+                quote! {
+                    let __stream = #method_call;
+                    // Map each Reply<T> to Reply<ReplyStreamParams> using the enum variant.
+                    let __mapped = ::futures_util::StreamExt::map(__stream, |__reply| {
+                        __reply.map(|__params| {
+                            #reply_stream_params_name::#stream_variant_name(__params)
+                        })
+                    });
+                    let __boxed: ::std::boxed::Box<
+                        dyn ::futures_util::Stream<
+                                Item = #crate_path::Reply<#reply_stream_params_name>
+                            > + ::core::marker::Unpin
+                    > = ::std::boxed::Box::new(__mapped);
+                    #crate_path::service::MethodReply::Multi(__boxed)
+                }
+            } else {
+                // Use enum variant when all streaming methods return concrete types.
+                // The mapping is done in the enum's Stream impl.
+                quote! {
+                    let __stream = #method_call;
+                    #crate_path::service::MethodReply::Multi(
+                        #reply_stream_name::#method_variant_name { stream: __stream }
+                    )
+                }
+            }
+        } else if method.returns_result {
             // Method returns Result<T, E>. Get the error variant for this method's error type.
             let error_variant = method.error_type.as_ref().map(|err_ty| {
-                let type_str = quote!(#err_ty).to_string();
+                let type_str = err_ty.to_token_stream().to_string();
                 let variant_idx = error_type_map.get(&type_str).copied().unwrap_or(0);
                 format_ident!("__{}Variant{}", reply_error_name, variant_idx)
             });
 
             if let Some(ref return_type) = method.return_type {
                 // Result<T, E> where T is not ().
-                let type_str = quote!(#return_type).to_string();
+                let type_str = return_type.to_token_stream().to_string();
                 let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
                 let reply_variant_name =
                     format_ident!("__{}Variant{}", method_call_name, variant_idx);
@@ -734,7 +1039,7 @@ fn generate_handle_body(
             }
         } else if let Some(ref return_type) = method.return_type {
             // Method returns T directly (not a Result).
-            let type_str = quote!(#return_type).to_string();
+            let type_str = return_type.to_token_stream().to_string();
             let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
             let reply_variant_name = format_ident!("__{}Variant{}", method_call_name, variant_idx);
             quote! {

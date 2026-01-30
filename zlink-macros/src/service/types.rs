@@ -13,6 +13,8 @@ pub(super) struct ParamInfo {
     pub serialized_name: Option<String>,
     /// Whether this parameter is marked with `#[zlink(connection)]`.
     pub is_connection: bool,
+    /// Whether this is the `more` parameter for streaming methods.
+    pub is_more: bool,
 }
 
 impl ParamInfo {
@@ -30,6 +32,7 @@ impl ParamInfo {
             ty: (*pat_type.ty).clone(),
             serialized_name: None,
             is_connection: false,
+            is_more: false,
         })
     }
 }
