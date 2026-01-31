@@ -46,10 +46,8 @@ where
     /// Get a stream of replies for the notified field.
     pub fn stream(&self) -> Stream<ReplyParams> {
         Stream {
-            inner: StreamInner::Broadcast {
-                stream: self.tx.subscribe().into(),
-                cached: None,
-            },
+            inner: self.tx.subscribe().into(),
+            cached: None,
         }
     }
 }
@@ -67,15 +65,10 @@ where
     ReplyParams: Send + 'static + Debug,
 {
     /// Create a new notified oneshot state.
-    pub fn new() -> (Self, Stream<ReplyParams>) {
+    pub fn new() -> (Self, OnceStream<ReplyParams>) {
         let (tx, rx) = oneshot::channel();
 
-        (
-            Self { tx },
-            Stream {
-                inner: StreamInner::Oneshot { receiver: rx },
-            },
-        )
+        (Self { tx }, OnceStream { inner: rx })
     }
 
     /// Set the value of the notified field and notify all listeners.
@@ -91,11 +84,12 @@ where
 
 pin_project! {
     /// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when
-    /// using [`State`] or [`Once`].
+    /// using [`State`].
     #[derive(Debug)]
     pub struct Stream<ReplyParams> {
         #[pin]
-        inner: StreamInner<ReplyParams>,
+        inner: BroadcastStream<ReplyParams>,
+        cached: Option<ReplyParams>,
     }
 }
 
@@ -107,54 +101,56 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
-        match this.inner.project() {
-            StreamInnerProj::Broadcast { mut stream, cached } => loop {
-                match futures_util::ready!(stream.as_mut().poll_next(cx)) {
-                    Some(Ok(reply)) => {
-                        // Cache and yield immediately with continues=true.
-                        *cached = Some(reply.clone());
-                        break Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(true))));
-                    }
-                    // Some intermediate values were missed. That's OK, as long as we get the
-                    // latest value.
-                    Some(Err(_)) => continue,
-                    // Channel closed - yield cached value with continues=false.
-                    None => {
-                        break Poll::Ready(
-                            cached
-                                .take()
-                                .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
-                        )
-                    }
+        let mut stream = this.inner;
+        loop {
+            match futures_util::ready!(stream.as_mut().poll_next(cx)) {
+                Some(Ok(reply)) => {
+                    // Cache and yield immediately with continues=true.
+                    *this.cached = Some(reply.clone());
+                    break Poll::Ready(Some(Reply::new(Some(reply)).set_continues(Some(true))));
                 }
-            },
-            StreamInnerProj::Oneshot { receiver } => {
-                if receiver.is_terminated() {
-                    return Poll::Ready(None);
+                // Some intermediate values were missed. That's OK, as long as we get the
+                // latest value.
+                Some(Err(_)) => continue,
+                // Channel closed - yield cached value with continues=false.
+                None => {
+                    break Poll::Ready(
+                        this.cached
+                            .take()
+                            .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
+                    )
                 }
-
-                receiver.poll(cx).map(|reply| {
-                    reply
-                        .map(|reply| Reply::new(Some(reply)).set_continues(Some(false)))
-                        .ok()
-                })
             }
         }
     }
 }
 
 pin_project! {
-    #[project = StreamInnerProj]
+    /// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when
+    /// using [`Once`].
     #[derive(Debug)]
-    enum StreamInner<ReplyParams> {
-        Broadcast {
-            #[pin]
-            stream: BroadcastStream<ReplyParams>,
-            cached: Option<ReplyParams>,
-        },
-        Oneshot {
-            #[pin]
-            receiver: oneshot::Receiver<ReplyParams>,
-        },
+    pub struct OnceStream<ReplyParams> {
+        #[pin]
+        inner: oneshot::Receiver<ReplyParams>,
+    }
+}
+
+impl<ReplyParams> futures_util::Stream for OnceStream<ReplyParams>
+where
+    ReplyParams: Send + 'static,
+{
+    type Item = Reply<ReplyParams>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        if this.inner.is_terminated() {
+            return Poll::Ready(None);
+        }
+
+        this.inner.poll(cx).map(|reply| {
+            reply
+                .map(|reply| Reply::new(Some(reply)).set_continues(Some(false)))
+                .ok()
+        })
     }
 }
