@@ -16,32 +16,34 @@ pub struct State<T, ReplyParams> {
     tx: broadcast::Sender<ReplyParams>,
 }
 
-impl<T, ReplyParams> State<T, ReplyParams>
+impl<T, ReplyParams> zlink_core::notified::State<T, ReplyParams> for State<T, ReplyParams>
 where
-    T: Into<ReplyParams> + Clone + Debug,
+    T: Into<ReplyParams> + Clone + Debug + Send,
     ReplyParams: Clone + Send + 'static + Debug,
 {
+    type Stream = Stream<ReplyParams>;
+
     /// Create a new notified field.
-    pub fn new(value: T) -> Self {
+    fn new(value: T) -> Self {
         let (tx, _) = broadcast::channel(1);
 
         Self { value, tx }
     }
 
     /// Set the value of the notified field and notify all listeners.
-    pub async fn set(&mut self, value: T) {
+    async fn set(&mut self, value: T) {
         self.value = value.clone();
         // Failure means that there are currently no receivers and that's ok.
         let _ = self.tx.send(value.into());
     }
 
     /// Get the value of the notified field.
-    pub fn get(&self) -> T {
+    fn get(&self) -> T {
         self.value.clone()
     }
 
     /// Get a stream of replies for the notified field.
-    pub fn stream(&self) -> Stream<ReplyParams> {
+    fn stream(&self) -> Stream<ReplyParams> {
         Stream {
             inner: self.tx.subscribe().into(),
             cached: None,

@@ -16,12 +16,14 @@ pub struct Once<ReplyParams> {
     tx: OneshotSender<ReplyParams>,
 }
 
-impl<ReplyParams> Once<ReplyParams>
+impl<ReplyParams> zlink_core::notified::Once<ReplyParams> for Once<ReplyParams>
 where
     ReplyParams: Send + 'static + Debug,
 {
+    type Stream = Stream<ReplyParams>;
+
     /// Create a new notified oneshot state.
-    pub fn new() -> (Self, Stream<ReplyParams>) {
+    fn new() -> (Self, Stream<ReplyParams>) {
         let (tx, rx) = bounded(1);
 
         (
@@ -34,7 +36,7 @@ where
     }
 
     /// Set the value of the notified field and notify all listeners.
-    pub fn notify<T>(self, value: T)
+    fn notify<T>(self, value: T)
     where
         T: Into<ReplyParams> + Debug,
     {

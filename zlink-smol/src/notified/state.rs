@@ -19,13 +19,15 @@ pub struct State<T, ReplyParams> {
     inactive_rx: InactiveReceiver<ReplyParams>,
 }
 
-impl<T, ReplyParams> State<T, ReplyParams>
+impl<T, ReplyParams> zlink_core::notified::State<T, ReplyParams> for State<T, ReplyParams>
 where
-    T: Into<ReplyParams> + Clone + Debug,
+    T: Into<ReplyParams> + Clone + Debug + Send,
     ReplyParams: Clone + Send + 'static + Debug,
 {
+    type Stream = Stream<ReplyParams>;
+
     /// Create a new notified field.
-    pub fn new(value: T) -> Self {
+    fn new(value: T) -> Self {
         let (mut tx, rx) = broadcast(1);
         // Notification broadcast shouldn't await active subscribers.
         tx.set_await_active(false);
@@ -45,7 +47,7 @@ where
     }
 
     /// Set the value of the notified field and notify all listeners.
-    pub async fn set(&mut self, value: T) {
+    async fn set(&mut self, value: T) {
         self.value = value.clone();
         self.tx
             .broadcast_direct(value.into())
@@ -55,12 +57,12 @@ where
     }
 
     /// The value of the notified field.
-    pub fn get(&self) -> T {
+    fn get(&self) -> T {
         self.value.clone()
     }
 
     /// A stream of replies for the notified field.
-    pub fn stream(&self) -> Stream<ReplyParams> {
+    fn stream(&self) -> Stream<ReplyParams> {
         Stream {
             inner: self.inactive_rx.activate_cloned(),
             cached: None,
