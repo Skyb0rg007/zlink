@@ -4,10 +4,11 @@ use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use crate::Reply;
+use pin_project_lite::pin_project;
 use tokio::sync::{broadcast, oneshot};
 use tokio_stream::wrappers::BroadcastStream;
 
@@ -44,10 +45,12 @@ where
 
     /// Get a stream of replies for the notified field.
     pub fn stream(&self) -> Stream<ReplyParams> {
-        Stream(StreamInner::Broadcast {
-            stream: self.tx.subscribe().into(),
-            cached: None,
-        })
+        Stream {
+            inner: StreamInner::Broadcast {
+                stream: self.tx.subscribe().into(),
+                cached: None,
+            },
+        }
     }
 }
 
@@ -67,7 +70,12 @@ where
     pub fn new() -> (Self, Stream<ReplyParams>) {
         let (tx, rx) = oneshot::channel();
 
-        (Self { tx }, Stream(StreamInner::Oneshot { receiver: rx }))
+        (
+            Self { tx },
+            Stream {
+                inner: StreamInner::Oneshot { receiver: rx },
+            },
+        )
     }
 
     /// Set the value of the notified field and notify all listeners.
@@ -81,22 +89,27 @@ where
     }
 }
 
-/// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when using
-/// [`State`] or [`Once`].
-#[derive(Debug)]
-pub struct Stream<ReplyParams>(StreamInner<ReplyParams>);
+pin_project! {
+    /// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when
+    /// using [`State`] or [`Once`].
+    #[derive(Debug)]
+    pub struct Stream<ReplyParams> {
+        #[pin]
+        inner: StreamInner<ReplyParams>,
+    }
+}
 
 impl<ReplyParams> futures_util::Stream for Stream<ReplyParams>
 where
-    ReplyParams: Clone + Send + Unpin + 'static,
+    ReplyParams: Clone + Send + 'static,
 {
     type Item = Reply<ReplyParams>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match &mut this.0 {
-            StreamInner::Broadcast { stream, cached } => loop {
-                match ready!(Pin::new(&mut *stream).poll_next(cx)) {
+        let this = self.project();
+        match this.inner.project() {
+            StreamInnerProj::Broadcast { mut stream, cached } => loop {
+                match futures_util::ready!(stream.as_mut().poll_next(cx)) {
                     Some(Ok(reply)) => {
                         // Cache and yield immediately with continues=true.
                         *cached = Some(reply.clone());
@@ -115,12 +128,12 @@ where
                     }
                 }
             },
-            StreamInner::Oneshot { receiver } => {
+            StreamInnerProj::Oneshot { receiver } => {
                 if receiver.is_terminated() {
                     return Poll::Ready(None);
                 }
 
-                Pin::new(&mut *receiver).poll(cx).map(|reply| {
+                receiver.poll(cx).map(|reply| {
                     reply
                         .map(|reply| Reply::new(Some(reply)).set_continues(Some(false)))
                         .ok()
@@ -130,13 +143,18 @@ where
     }
 }
 
-#[derive(Debug)]
-enum StreamInner<ReplyParams> {
-    Broadcast {
-        stream: BroadcastStream<ReplyParams>,
-        cached: Option<ReplyParams>,
-    },
-    Oneshot {
-        receiver: oneshot::Receiver<ReplyParams>,
-    },
+pin_project! {
+    #[project = StreamInnerProj]
+    #[derive(Debug)]
+    enum StreamInner<ReplyParams> {
+        Broadcast {
+            #[pin]
+            stream: BroadcastStream<ReplyParams>,
+            cached: Option<ReplyParams>,
+        },
+        Oneshot {
+            #[pin]
+            receiver: oneshot::Receiver<ReplyParams>,
+        },
+    }
 }

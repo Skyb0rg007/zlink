@@ -64,10 +64,12 @@ where
 
     /// A stream of replies for the notified field.
     pub fn stream(&self) -> Stream<ReplyParams> {
-        Stream(Box::pin(StreamInner::Broadcast {
-            receiver: self.inactive_rx.activate_cloned(),
-            cached: None,
-        }))
+        Stream {
+            inner: StreamInner::Broadcast {
+                receiver: self.inactive_rx.activate_cloned(),
+                cached: None,
+            },
+        }
     }
 }
 
@@ -89,10 +91,12 @@ where
 
         (
             Self { tx },
-            Stream(Box::pin(StreamInner::Oneshot {
-                receiver: rx,
-                terminated: false,
-            })),
+            Stream {
+                inner: StreamInner::Oneshot {
+                    receiver: rx,
+                    terminated: false,
+                },
+            },
         )
     }
 
@@ -107,16 +111,13 @@ where
     }
 }
 
-/// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when using
-/// [`State`] or [`Once`].
-pub struct Stream<ReplyParams>(Pin<Box<StreamInner<ReplyParams>>>);
-
-impl<ReplyParams> std::fmt::Debug for Stream<ReplyParams>
-where
-    ReplyParams: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Stream").field(&self.0).finish()
+pin_project! {
+    /// The stream to use as the [`crate::Service::ReplyStream`] in service implementation when
+    /// using [`State`] or [`Once`].
+    #[derive(Debug)]
+    pub struct Stream<ReplyParams> {
+        #[pin]
+        inner: StreamInner<ReplyParams>,
     }
 }
 
@@ -127,10 +128,8 @@ where
     type Item = Reply<ReplyParams>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Since Stream is Unpin, we can get mutable access
-        let this = self.get_mut();
-        // Project through the Pin<Box<StreamInner>> to the receivers
-        match this.0.as_mut().project() {
+        let this = self.project();
+        match this.inner.project() {
             StreamInnerProj::Broadcast {
                 mut receiver,
                 cached,
