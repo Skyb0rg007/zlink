@@ -2234,6 +2234,7 @@ name = "zlink-tokio"
 version = "0.4.0"
 dependencies = [
  "futures-util",
+ "pin-project-lite",
  "serde",
  "serde_repr",
  "tempfile",

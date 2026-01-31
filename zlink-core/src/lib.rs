@@ -35,6 +35,9 @@ pub use server::{
     Server,
 };
 mod call;
+#[cfg(feature = "server")]
+#[doc(hidden)]
+pub mod notified;
 pub use call::Call;
 pub mod reply;
 pub use reply::Reply;

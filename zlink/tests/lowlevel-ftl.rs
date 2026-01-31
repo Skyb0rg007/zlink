@@ -10,7 +10,7 @@ use zlink::{
     connection::Socket,
     idl::Interface,
     introspect::{self, CustomType, ReplyError as _, Type},
-    notified,
+    notified::{self, traits::State as _},
     service::MethodReply,
     unix::{bind, connect},
     varlink_service::{
