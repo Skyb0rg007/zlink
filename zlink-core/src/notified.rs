@@ -29,6 +29,9 @@ where
 
     /// Get a stream of replies for this state.
     fn stream(&self) -> Self::Stream;
+
+    /// Get a stream of replies for this state, that only yields one reply: the current state.
+    fn stream_once(&self) -> Self::Stream;
 }
 
 /// Trait for a one-shot notification (useful for method call handlers).
