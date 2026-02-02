@@ -40,6 +40,17 @@ impl<Params> Reply<Params> {
     pub fn continues(&self) -> Option<bool> {
         self.continues
     }
+
+    /// Map the parameters of this reply using the provided function.
+    pub fn map<U, F>(self, f: F) -> Reply<U>
+    where
+        F: FnOnce(Params) -> U,
+    {
+        Reply {
+            parameters: self.parameters.map(f),
+            continues: self.continues,
+        }
+    }
 }
 
 impl<Params> From<Params> for Reply<Params> {
