@@ -7,6 +7,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{connection::Socket, Call, Connection, Reply};
 
+/// The item type that a [`Service::ReplyStream`] yields.
+///
+/// On `std`, this is a tuple of the reply and the file descriptors to send with it. On `no_std`,
+/// this is just the reply.
+#[cfg(feature = "std")]
+pub type ReplyStreamItem<Params> = (Reply<Params>, Vec<std::os::fd::OwnedFd>);
+/// The item type that a [`Service::ReplyStream`] yields.
+///
+/// On `std`, this is a tuple of the reply and the file descriptors to send with it. On `no_std`,
+/// this is just the reply.
+#[cfg(not(feature = "std"))]
+pub type ReplyStreamItem<Params> = Reply<Params>;
+
 /// Service trait for handling method calls.
 pub trait Service<Sock>
 where
@@ -32,7 +45,7 @@ where
     /// The type of the multi-reply stream.
     ///
     /// If the client asks for multiple replies, this stream will be used to send them.
-    type ReplyStream: Stream<Item = Reply<Self::ReplyStreamParams>> + Unpin;
+    type ReplyStream: Stream<Item = ReplyStreamItem<Self::ReplyStreamParams>> + Unpin;
     /// The type of the error reply.
     ///
     /// This should be a type that can serialize itself to the whole reply object, containing
@@ -48,10 +61,28 @@ where
         &'ser mut self,
         method: &'ser Call<Self::MethodCall<'_>>,
         conn: &mut Connection<Sock>,
+        #[cfg(feature = "std")] fds: Vec<std::os::fd::OwnedFd>,
     ) -> impl Future<
-        Output = MethodReply<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>>,
+        Output = HandleResult<Self::ReplyParams<'ser>, Self::ReplyStream, Self::ReplyError<'ser>>,
     >;
 }
+
+/// The result of a [`Service::handle`] call.
+///
+/// On `std`, this is a tuple of the method reply and the file descriptors to send with it. On
+/// `no_std`, this is just the method reply.
+#[cfg(feature = "std")]
+pub type HandleResult<Params, ReplyStream, ReplyError> = (
+    MethodReply<Params, ReplyStream, ReplyError>,
+    Vec<std::os::fd::OwnedFd>,
+);
+/// The result of a [`Service::handle`] call.
+///
+/// On `std`, this is a tuple of the method reply and the file descriptors to send with it. On
+/// `no_std`, this is just the method reply.
+#[cfg(not(feature = "std"))]
+pub type HandleResult<Params, ReplyStream, ReplyError> =
+    MethodReply<Params, ReplyStream, ReplyError>;
 
 /// A service method call reply.
 #[derive(Debug)]

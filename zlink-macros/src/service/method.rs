@@ -34,6 +34,8 @@ pub(super) struct MethodInfo {
     pub stream_return_type: Option<Type>,
     /// Whether the streaming method returns `impl Trait` (requires boxing).
     pub stream_uses_impl_trait: bool,
+    /// Whether this method returns file descriptors (`#[zlink(return_fds)]`).
+    pub return_fds: bool,
 }
 
 impl MethodInfo {
@@ -75,6 +77,7 @@ impl MethodInfo {
                     let param_attrs = extract_param_attrs(&pat_type.attrs);
                     param_info.serialized_name = param_attrs.rename;
                     param_info.is_connection = param_attrs.is_connection;
+                    param_info.is_fds = param_attrs.is_fds;
                 }
                 // For streaming methods, the first param must be `more: bool`.
                 if is_streaming && idx == 0 {
@@ -100,6 +103,16 @@ impl MethodInfo {
             }
         }
 
+        // Validate FD attributes.
+        let return_fds = method_attrs.return_fds;
+        let fds_params: Vec<_> = params.iter().filter(|p| p.is_fds).collect();
+        if fds_params.len() > 1 {
+            return Err(Error::new_spanned(
+                &method.sig,
+                "at most one `#[zlink(fds)]` parameter is allowed per method",
+            ));
+        }
+
         // Extract return type and check if it's a Result or Stream.
         let (
             return_type,
@@ -108,7 +121,57 @@ impl MethodInfo {
             stream_item_type,
             stream_return_type,
             stream_uses_impl_trait,
-        ) = if is_streaming {
+        ) = if is_streaming && return_fds {
+            // For streaming methods with FD passing, the stream yields (Reply<T>, Vec<OwnedFd>).
+            match &method.sig.output {
+                ReturnType::Default => {
+                    return Err(Error::new_spanned(
+                        &method.sig,
+                        "streaming methods with return_fds must return \
+                         a Stream<Item = (Reply<T>, Vec<OwnedFd>)>",
+                    ))
+                }
+                ReturnType::Type(_, ty) => {
+                    let stream_item = extract_stream_item_type(ty).ok_or_else(|| {
+                        Error::new_spanned(
+                            ty,
+                            "streaming methods with return_fds must return \
+                             a Stream<Item = (Reply<T>, Vec<OwnedFd>)> \
+                             (could not extract Stream's Item type)",
+                        )
+                    })?;
+                    // Extract Reply<T> from (Reply<T>, Vec<OwnedFd>).
+                    let reply_type =
+                        extract_first_tuple_element(&stream_item).ok_or_else(|| {
+                            Error::new_spanned(
+                                ty,
+                                "streaming methods with return_fds must return \
+                             a Stream<Item = (Reply<T>, Vec<OwnedFd>)> \
+                             (stream item must be a tuple)",
+                            )
+                        })?;
+                    // Extract T from Reply<T>.
+                    let inner_type = extract_reply_inner_type(&reply_type).ok_or_else(|| {
+                        Error::new_spanned(
+                            ty,
+                            "streaming methods with return_fds must return \
+                             a Stream<Item = (Reply<T>, Vec<OwnedFd>)> \
+                             (first tuple element must be Reply<T>)",
+                        )
+                    })?;
+                    // Check if return type uses `impl Trait`.
+                    let uses_impl_trait = matches!(**ty, Type::ImplTrait(_));
+                    (
+                        None,
+                        false,
+                        None,
+                        Some(inner_type),
+                        Some((**ty).clone()),
+                        uses_impl_trait,
+                    )
+                }
+            }
+        } else if is_streaming {
             // For streaming methods, extract the Stream's Item type.
             // Streaming methods can return either:
             // - `impl Stream<Item = Reply<T>>` (will use boxing)
@@ -148,6 +211,42 @@ impl MethodInfo {
                     )
                 }
             }
+        } else if return_fds {
+            // For return_fds methods, the return type is a tuple whose second element
+            // is `Vec<OwnedFd>`. The first element is either:
+            // - `Result<T, E>` → `(Result<T, E>, Vec<OwnedFd>)` — extract T and E
+            // - `T` → `(T, Vec<OwnedFd>)` — extract T, no error type
+            match &method.sig.output {
+                ReturnType::Default => {
+                    return Err(Error::new_spanned(
+                        &method.sig,
+                        "`return_fds` methods must have a return type",
+                    ))
+                }
+                ReturnType::Type(_, ty) => {
+                    // Extract the first element of the tuple.
+                    let first = extract_first_tuple_element(ty).ok_or_else(|| {
+                        Error::new_spanned(
+                            ty,
+                            "`return_fds` methods must return \
+                             `(T, Vec<OwnedFd>)` or `(Result<T, E>, Vec<OwnedFd>)`",
+                        )
+                    })?;
+
+                    if let Some((inner_ty, err_ty)) = extract_result_types(&first) {
+                        // (Result<T, E>, Vec<OwnedFd>).
+                        (inner_ty, true, Some(err_ty), None, None, false)
+                    } else {
+                        // (T, Vec<OwnedFd>).
+                        let data_ty = if is_unit_type(&first) {
+                            None
+                        } else {
+                            Some(first)
+                        };
+                        (data_ty, false, None, None, None, false)
+                    }
+                }
+            }
         } else {
             // For non-streaming methods, extract Result types as before.
             match &method.sig.output {
@@ -179,6 +278,7 @@ impl MethodInfo {
             stream_item_type,
             stream_return_type,
             stream_uses_impl_trait,
+            return_fds,
         })
     }
 
@@ -194,11 +294,11 @@ impl MethodInfo {
         self.params.iter().any(|p| p.is_connection)
     }
 
-    /// Get parameters that are serialized (excludes connection and more parameters).
+    /// Get parameters that are serialized (excludes connection, more, and fds parameters).
     pub(super) fn serialized_params(&self) -> impl Iterator<Item = &ParamInfo> {
         self.params
             .iter()
-            .filter(|p| !p.is_connection && !p.is_more)
+            .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
     }
 }
 
@@ -211,6 +311,8 @@ struct MethodAttrs {
     rename: Option<String>,
     /// Whether this method returns a stream of replies.
     is_streaming: bool,
+    /// Whether this method returns file descriptors.
+    return_fds: bool,
 }
 
 impl MethodAttrs {
@@ -276,6 +378,15 @@ impl MethodAttrs {
                         }
                         result.is_streaming = true;
                     }
+                    Meta::Path(path) if path.is_ident("return_fds") => {
+                        if result.return_fds {
+                            return Err(Error::new_spanned(
+                                &meta,
+                                "duplicate `return_fds` attribute",
+                            ));
+                        }
+                        result.return_fds = true;
+                    }
                     _ => {
                         return Err(Error::new_spanned(&meta, "unknown zlink attribute"));
                     }
@@ -299,6 +410,8 @@ struct ParamAttrs {
     rename: Option<String>,
     /// Whether this parameter should receive the connection.
     is_connection: bool,
+    /// Whether this parameter receives file descriptors.
+    is_fds: bool,
 }
 
 /// Extract zlink attributes from parameter attributes.
@@ -331,6 +444,9 @@ fn extract_param_attrs(attrs: &[Attribute]) -> ParamAttrs {
                 }
                 Meta::Path(path) if path.is_ident("connection") => {
                     result.is_connection = true;
+                }
+                Meta::Path(path) if path.is_ident("fds") => {
+                    result.is_fds = true;
                 }
                 _ => {}
             }
@@ -501,4 +617,21 @@ fn is_bool_type(ty: &Type) -> bool {
         return false;
     };
     type_path.path.is_ident("bool")
+}
+
+/// Check if a type is the unit type `()`.
+fn is_unit_type(ty: &Type) -> bool {
+    let Type::Tuple(tuple) = ty else {
+        return false;
+    };
+    tuple.elems.is_empty()
+}
+
+/// Extract the first element type from a tuple type `(T, ...)`.
+/// Returns `None` if the type is not a tuple with at least one element.
+fn extract_first_tuple_element(ty: &Type) -> Option<Type> {
+    let Type::Tuple(tuple) = ty else {
+        return None;
+    };
+    tuple.elems.first().cloned()
 }

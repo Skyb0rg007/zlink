@@ -176,7 +176,7 @@ pub(super) fn generate_service_impl(
                 quote! {
                     ::std::boxed::Box<
                         dyn ::futures_util::Stream<
-                                Item = #crate_path::Reply<#reply_stream_params_name>
+                                Item = #crate_path::service::ReplyStreamItem<#reply_stream_params_name>
                             > + ::core::marker::Unpin
                     >
                 },
@@ -201,11 +201,17 @@ pub(super) fn generate_service_impl(
     } else {
         // No streaming methods - use empty stream.
         (
-            quote! { ::futures_util::stream::Empty<#crate_path::Reply<()>> },
+            quote! { ::futures_util::stream::Empty<#crate_path::service::ReplyStreamItem<()>> },
             quote! { () },
             quote! {},
         )
     };
+
+    // Generate the FDs parameter for the handle method (std only).
+    #[cfg(feature = "std")]
+    let handle_fds_param = quote! { __zlink_fds: ::std::vec::Vec<::std::os::fd::OwnedFd>, };
+    #[cfg(not(feature = "std"))]
+    let handle_fds_param = quote! {};
 
     // Generate the impl block.
     let service_impl = quote! {
@@ -222,7 +228,8 @@ pub(super) fn generate_service_impl(
                 &'__zlink_ser mut self,
                 __zlink_call: &'__zlink_ser #crate_path::Call<Self::MethodCall<'_>>,
                 __zlink_conn: &mut #crate_path::Connection<#socket_ty>,
-            ) -> #crate_path::service::MethodReply<
+                #handle_fds_param
+            ) -> #crate_path::service::HandleResult<
                 Self::ReplyParams<'__zlink_ser>,
                 Self::ReplyStream,
                 Self::ReplyError<'__zlink_ser>,
@@ -585,6 +592,48 @@ fn generate_reply_stream_enum(
         .collect();
 
     // Generate poll_next match arms.
+    // On std, stream items are (Reply<T>, Vec<OwnedFd>) tuples.
+    // On no_std, stream items are just Reply<T>.
+    #[cfg(feature = "std")]
+    let poll_arms: Vec<TokenStream> = streaming_methods
+        .iter()
+        .map(|method| {
+            let variant_name = format_ident!("{}", method.varlink_name);
+            let item_type = method.stream_item_type.as_ref().unwrap();
+            let type_str = item_type.to_token_stream().to_string();
+            let params_variant = stream_item_type_map
+                .get(&type_str)
+                .cloned()
+                .unwrap_or_else(|| format_ident!("__Unknown"));
+
+            if method.return_fds {
+                // Method's stream yields (Reply<T>, Vec<OwnedFd>).
+                quote! {
+                    #projection_name::#variant_name { stream } => {
+                        stream.poll_next(cx).map(|opt| opt.map(|(reply, fds)| {
+                            let mapped_reply = reply.map(|params| {
+                                #reply_stream_params_name::#params_variant(params)
+                            });
+                            (mapped_reply, fds)
+                        }))
+                    }
+                }
+            } else {
+                // Method's stream yields Reply<T>, wrap with empty FDs.
+                quote! {
+                    #projection_name::#variant_name { stream } => {
+                        stream.poll_next(cx).map(|opt| opt.map(|reply| {
+                            let mapped_reply = reply.map(|params| {
+                                #reply_stream_params_name::#params_variant(params)
+                            });
+                            (mapped_reply, ::std::vec::Vec::new())
+                        }))
+                    }
+                }
+            }
+        })
+        .collect();
+    #[cfg(not(feature = "std"))]
     let poll_arms: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
@@ -616,7 +665,7 @@ fn generate_reply_stream_enum(
         }
 
         impl ::futures_util::Stream for #enum_name {
-            type Item = #crate_path::Reply<#reply_stream_params_name>;
+            type Item = #crate_path::service::ReplyStreamItem<#reply_stream_params_name>;
 
             fn poll_next(
                 self: ::core::pin::Pin<&mut Self>,
@@ -831,6 +880,46 @@ fn generate_interface_descriptions(
     quote! { #(#descriptions)* }
 }
 
+/// Wrap a `MethodReply` expression into a `HandleResult` with no file descriptors.
+///
+/// On std: `(method_reply, Vec::new())`
+/// On no_std: `method_reply`
+fn wrap_handle_result_no_fds(inner: TokenStream) -> TokenStream {
+    #[cfg(feature = "std")]
+    {
+        quote! {
+            {
+                let __method_reply = { #inner };
+                (__method_reply, ::std::vec::Vec::new())
+            }
+        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        inner
+    }
+}
+
+/// Wrap a `MethodReply` expression into a `HandleResult` with the given file descriptors.
+///
+/// On std: `(method_reply, fds_expr)`
+/// On no_std: `method_reply`
+#[cfg(feature = "std")]
+fn wrap_handle_result_with_fds(inner: TokenStream, fds_expr: TokenStream) -> TokenStream {
+    quote! {
+        {
+            let __method_reply = { #inner };
+            (__method_reply, #fds_expr)
+        }
+    }
+}
+
+/// On no_std, FDs are ignored.
+#[cfg(not(feature = "std"))]
+fn wrap_handle_result_with_fds(inner: TokenStream, _fds_expr: TokenStream) -> TokenStream {
+    inner
+}
+
 /// Generate the `handle` method body with match arms.
 fn generate_handle_body(
     methods_info: &[MethodInfo],
@@ -903,11 +992,22 @@ fn generate_handle_body(
                 })
                 .collect();
 
+            // Set up bindings for FD params.
+            let fds_bindings: Vec<TokenStream> = method
+                .params
+                .iter()
+                .filter(|p| p.is_fds)
+                .map(|p| {
+                    let name = &p.name;
+                    quote! { let #name = __zlink_fds; }
+                })
+                .collect();
+
             // Set up bindings for regular params (clone from pattern match).
             let param_bindings: Vec<TokenStream> = method
                 .params
                 .iter()
-                .filter(|p| !p.is_connection && !p.is_more)
+                .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
                 .map(|p| {
                     let name = &p.name;
                     quote! { let #name = ::core::clone::Clone::clone(#name); }
@@ -918,6 +1018,7 @@ fn generate_handle_body(
                 {
                     #(#conn_bindings)*
                     #(#more_bindings)*
+                    #(#fds_bindings)*
                     #(#param_bindings)*
                     async move #body
                 }.await
@@ -931,6 +1032,9 @@ fn generate_handle_body(
                     if p.is_more {
                         // `more` param comes from the call request.
                         quote! { __zlink_call.more() }
+                    } else if p.is_fds {
+                        // FD param gets the incoming FDs.
+                        quote! { __zlink_fds }
                     } else {
                         // Clone from the pattern match.
                         let name = &p.name;
@@ -943,6 +1047,7 @@ fn generate_handle_body(
         };
 
         // Build the return expression based on method type.
+        // Each branch must produce a `HandleResult`, not a raw `MethodReply`.
         let return_expr = if method.is_streaming {
             // Streaming method - wrap the stream to convert items to the enum type.
             // The stream produces Reply<T> items, we map to Reply<ReplyStreamParams>.
@@ -961,11 +1066,55 @@ fn generate_handle_body(
             // Use the method's varlink name for the enum variant.
             let method_variant_name = format_ident!("{}", method.varlink_name);
 
-            if *needs_stream_boxing {
+            let streaming_reply = if *needs_stream_boxing {
                 // Use boxing when any streaming method uses `impl Trait`.
-                quote! {
+                // On std, stream items are (Reply<T>, Vec<OwnedFd>) tuples.
+                #[cfg(feature = "std")]
+                let boxed_stream = if method.return_fds {
+                    // Method's stream yields (Reply<T>, Vec<OwnedFd>).
+                    quote! {
+                        let __stream = #method_call;
+                        let __mapped = ::futures_util::StreamExt::map(
+                            __stream,
+                            |(__reply, __fds)| {
+                                let __mapped_reply = __reply.map(|__params| {
+                                    #reply_stream_params_name::#stream_variant_name(__params)
+                                });
+                                (__mapped_reply, __fds)
+                            },
+                        );
+                        let __boxed: ::std::boxed::Box<
+                            dyn ::futures_util::Stream<
+                                    Item = #crate_path::service::ReplyStreamItem<
+                                        #reply_stream_params_name
+                                    >
+                                > + ::core::marker::Unpin
+                        > = ::std::boxed::Box::new(__mapped);
+                        #crate_path::service::MethodReply::Multi(__boxed)
+                    }
+                } else {
+                    // Method's stream yields Reply<T>, wrap with empty FDs.
+                    quote! {
+                        let __stream = #method_call;
+                        let __mapped = ::futures_util::StreamExt::map(__stream, |__reply| {
+                            let __mapped_reply = __reply.map(|__params| {
+                                #reply_stream_params_name::#stream_variant_name(__params)
+                            });
+                            (__mapped_reply, ::std::vec::Vec::new())
+                        });
+                        let __boxed: ::std::boxed::Box<
+                            dyn ::futures_util::Stream<
+                                    Item = #crate_path::service::ReplyStreamItem<
+                                        #reply_stream_params_name
+                                    >
+                                > + ::core::marker::Unpin
+                        > = ::std::boxed::Box::new(__mapped);
+                        #crate_path::service::MethodReply::Multi(__boxed)
+                    }
+                };
+                #[cfg(not(feature = "std"))]
+                let boxed_stream = quote! {
                     let __stream = #method_call;
-                    // Map each Reply<T> to Reply<ReplyStreamParams> using the enum variant.
                     let __mapped = ::futures_util::StreamExt::map(__stream, |__reply| {
                         __reply.map(|__params| {
                             #reply_stream_params_name::#stream_variant_name(__params)
@@ -973,19 +1122,108 @@ fn generate_handle_body(
                     });
                     let __boxed: ::std::boxed::Box<
                         dyn ::futures_util::Stream<
-                                Item = #crate_path::Reply<#reply_stream_params_name>
+                                Item = #crate_path::service::ReplyStreamItem<
+                                    #reply_stream_params_name
+                                >
                             > + ::core::marker::Unpin
                     > = ::std::boxed::Box::new(__mapped);
                     #crate_path::service::MethodReply::Multi(__boxed)
-                }
+                };
+                boxed_stream
             } else {
                 // Use enum variant when all streaming methods return concrete types.
-                // The mapping is done in the enum's Stream impl.
                 quote! {
                     let __stream = #method_call;
                     #crate_path::service::MethodReply::Multi(
                         #reply_stream_name::#method_variant_name { stream: __stream }
                     )
+                }
+            };
+            wrap_handle_result_no_fds(streaming_reply)
+        } else if method.return_fds && method.returns_result {
+            // return_fds + (Result<T, E>, Vec<OwnedFd>).
+            // FDs are available on both Ok and Err arms.
+            let error_variant = method.error_type.as_ref().map(|err_ty| {
+                let type_str = err_ty.to_token_stream().to_string();
+                let variant_idx = error_type_map.get(&type_str).copied().unwrap_or(0);
+                format_ident!("__{}Variant{}", reply_error_name, variant_idx)
+            });
+            let error_convert = if let Some(ref err_variant) = error_variant {
+                quote! { #reply_error_name::#err_variant(__err) }
+            } else {
+                quote! { ::core::convert::From::from(__err) }
+            };
+            let err_reply = quote! {
+                #crate_path::service::MethodReply::Error(#error_convert)
+            };
+            let err_arm = wrap_handle_result_with_fds(err_reply, quote! { __out_fds });
+
+            if let Some(ref return_type) = method.return_type {
+                let type_str = return_type.to_token_stream().to_string();
+                let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
+                let reply_variant_name =
+                    format_ident!("__{}Variant{}", method_call_name, variant_idx);
+                let ok_reply = quote! {
+                    #crate_path::service::MethodReply::Single(Some(
+                        #reply_params_name::#reply_variant_name(__ok)
+                    ))
+                };
+                let ok_arm = wrap_handle_result_with_fds(ok_reply, quote! { __out_fds });
+                quote! {
+                    let (__result, __out_fds) = #method_call;
+                    match __result {
+                        ::core::result::Result::Ok(__ok) => {
+                            #ok_arm
+                        }
+                        ::core::result::Result::Err(__err) => {
+                            #err_arm
+                        }
+                    }
+                }
+            } else {
+                // (Result<(), E>, Vec<OwnedFd>).
+                let ok_reply = quote! {
+                    #crate_path::service::MethodReply::Single(None)
+                };
+                let ok_arm = wrap_handle_result_with_fds(ok_reply, quote! { __out_fds });
+                quote! {
+                    let (__result, __out_fds) = #method_call;
+                    match __result {
+                        ::core::result::Result::Ok(()) => {
+                            #ok_arm
+                        }
+                        ::core::result::Result::Err(__err) => {
+                            #err_arm
+                        }
+                    }
+                }
+            }
+        } else if method.return_fds {
+            // return_fds without Result: (T, Vec<OwnedFd>).
+            if let Some(ref return_type) = method.return_type {
+                let type_str = return_type.to_token_stream().to_string();
+                let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
+                let reply_variant_name =
+                    format_ident!("__{}Variant{}", method_call_name, variant_idx);
+                let ok_reply = quote! {
+                    #crate_path::service::MethodReply::Single(Some(
+                        #reply_params_name::#reply_variant_name(__ok)
+                    ))
+                };
+                let ok_arm = wrap_handle_result_with_fds(ok_reply, quote! { __out_fds });
+                quote! {
+                    let (__ok, __out_fds) = #method_call;
+                    #ok_arm
+                }
+            } else {
+                // ((), Vec<OwnedFd>).
+                let ok_reply = quote! {
+                    #crate_path::service::MethodReply::Single(None)
+                };
+                let ok_arm = wrap_handle_result_with_fds(ok_reply, quote! { __out_fds });
+                quote! {
+                    let ((), __out_fds) = #method_call;
+                    #ok_arm
                 }
             }
         } else if method.returns_result {
@@ -1007,7 +1245,7 @@ fn generate_handle_body(
                 } else {
                     quote! { ::core::convert::From::from(__err) }
                 };
-                quote! {
+                wrap_handle_result_no_fds(quote! {
                     match #method_call {
                         ::core::result::Result::Ok(__ok) => {
                             #crate_path::service::MethodReply::Single(Some(
@@ -1018,7 +1256,7 @@ fn generate_handle_body(
                             #crate_path::service::MethodReply::Error(#error_convert)
                         }
                     }
-                }
+                })
             } else {
                 // Result<(), E>.
                 let error_convert = if let Some(err_variant) = error_variant {
@@ -1026,7 +1264,7 @@ fn generate_handle_body(
                 } else {
                     quote! { ::core::convert::From::from(__err) }
                 };
-                quote! {
+                wrap_handle_result_no_fds(quote! {
                     match #method_call {
                         ::core::result::Result::Ok(()) => {
                             #crate_path::service::MethodReply::Single(None)
@@ -1035,25 +1273,25 @@ fn generate_handle_body(
                             #crate_path::service::MethodReply::Error(#error_convert)
                         }
                     }
-                }
+                })
             }
         } else if let Some(ref return_type) = method.return_type {
             // Method returns T directly (not a Result).
             let type_str = return_type.to_token_stream().to_string();
             let variant_idx = type_to_variant.get(&type_str).copied().unwrap_or(0);
             let reply_variant_name = format_ident!("__{}Variant{}", method_call_name, variant_idx);
-            quote! {
+            wrap_handle_result_no_fds(quote! {
                 let __result = #method_call;
                 #crate_path::service::MethodReply::Single(Some(
                     #reply_params_name::#reply_variant_name(__result)
                 ))
-            }
+            })
         } else {
             // Method has no return type.
-            quote! {
+            wrap_handle_result_no_fds(quote! {
                 let _ = #method_call;
                 #crate_path::service::MethodReply::Single(None)
-            }
+            })
         };
 
         user_match_arms.push(quote! {
@@ -1079,15 +1317,18 @@ fn generate_handle_body(
     );
 
     // Add a catch-all arm for unknown methods (returns MethodNotFound error).
+    let unknown_method_reply = wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Error(
+            #reply_error_name::#varlink_error_variant(
+                #crate_path::varlink_service::Error::MethodNotFound {
+                    method: ::std::borrow::Cow::Borrowed("unknown"),
+                }
+            )
+        )
+    });
     user_match_arms.push(quote! {
         #user_methods_name::#unknown_variant => {
-            #crate_path::service::MethodReply::Error(
-                #reply_error_name::#varlink_error_variant(
-                    #crate_path::varlink_service::Error::MethodNotFound {
-                        method: ::std::borrow::Cow::Borrowed("unknown"),
-                    }
-                )
-            )
+            #unknown_method_reply
         }
     });
 
@@ -1109,14 +1350,18 @@ fn generate_handle_body(
                 type_name.to_uppercase(),
                 interface.replace('.', "_").to_uppercase()
             );
+            let desc_reply = wrap_handle_result_no_fds(quote! {
+                #crate_path::service::MethodReply::Single(Some(
+                    #reply_params_name::#varlink_reply_variant(
+                        #crate_path::varlink_service::Reply::InterfaceDescription(desc)
+                    )
+                ))
+            });
             quote! {
                 #interface => {
-                    let desc = #crate_path::varlink_service::InterfaceDescription::from(#const_name);
-                    #crate_path::service::MethodReply::Single(Some(
-                        #reply_params_name::#varlink_reply_variant(
-                            #crate_path::varlink_service::Reply::InterfaceDescription(desc)
-                        )
-                    ))
+                    let desc =
+                        #crate_path::varlink_service::InterfaceDescription::from(#const_name);
+                    #desc_reply
                 }
             }
         })
@@ -1133,6 +1378,29 @@ fn generate_handle_body(
     let url = service_attrs.url.as_deref().unwrap_or("");
 
     // Generate the varlink service methods match.
+    let get_info_reply = wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Single(Some(
+            #reply_params_name::#varlink_reply_variant(
+                #crate_path::varlink_service::Reply::Info(info)
+            )
+        ))
+    });
+    let varlink_desc_reply = wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Single(Some(
+            #reply_params_name::#varlink_reply_variant(
+                #crate_path::varlink_service::Reply::InterfaceDescription(desc)
+            )
+        ))
+    });
+    let interface_not_found_reply = wrap_handle_result_no_fds(quote! {
+        #crate_path::service::MethodReply::Error(
+            #reply_error_name::#varlink_error_variant(
+                #crate_path::varlink_service::Error::InterfaceNotFound {
+                    interface: ::std::borrow::Cow::Borrowed(interface),
+                }
+            )
+        )
+    });
     let varlink_service_match = quote! {
         #method_call_name::__VarlinkService(__varlink_method) => {
             match __varlink_method {
@@ -1147,33 +1415,20 @@ fn generate_handle_body(
                             #crate_path::varlink_service::INTERFACE_NAME,
                         ],
                     );
-                    #crate_path::service::MethodReply::Single(Some(
-                        #reply_params_name::#varlink_reply_variant(
-                            #crate_path::varlink_service::Reply::Info(info)
-                        )
-                    ))
+                    #get_info_reply
                 }
                 #crate_path::varlink_service::Method::GetInterfaceDescription { interface } => {
                     match *interface {
                         #(#interface_match_arms)*
                         #crate_path::varlink_service::INTERFACE_NAME => {
-                            let desc = #crate_path::varlink_service::InterfaceDescription::from(
-                                #crate_path::varlink_service::DESCRIPTION
-                            );
-                            #crate_path::service::MethodReply::Single(Some(
-                                #reply_params_name::#varlink_reply_variant(
-                                    #crate_path::varlink_service::Reply::InterfaceDescription(desc)
-                                )
-                            ))
+                            let desc =
+                                #crate_path::varlink_service::InterfaceDescription::from(
+                                    #crate_path::varlink_service::DESCRIPTION
+                                );
+                            #varlink_desc_reply
                         }
                         _ => {
-                            #crate_path::service::MethodReply::Error(
-                                #reply_error_name::#varlink_error_variant(
-                                    #crate_path::varlink_service::Error::InterfaceNotFound {
-                                        interface: ::std::borrow::Cow::Borrowed(interface),
-                                    }
-                                )
-                            )
+                            #interface_not_found_reply
                         }
                     }
                 }

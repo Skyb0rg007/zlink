@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{select, sync::oneshot, fs::remove_file};
 use zlink::{
     proxy,
-    service::{MethodReply, Service},
+    service::{self, MethodReply, Service},
     connection::{Connection, Socket},
     unix, Call, ReplyError, Server,
 };
@@ -196,7 +196,7 @@ where
     where
         Self: 'ser;
     type ReplyStreamParams = ();
-    type ReplyStream = futures_util::stream::Empty<zlink::Reply<()>>;
+    type ReplyStream = futures_util::stream::Empty<zlink::service::ReplyStreamItem<()>>;
     type ReplyError<'ser> = CalculatorError<'ser>
     where
         Self: 'ser;
@@ -205,15 +205,25 @@ where
         &'service mut self,
         call: &'service Call<Self::MethodCall<'_>>,
         conn: &mut Connection<Sock>,
-    ) -> MethodReply<Self::ReplyParams<'service>, Self::ReplyStream, Self::ReplyError<'service>> {
-        match call.method() {
+        fds: Vec<std::os::fd::OwnedFd>,
+    ) -> service::HandleResult<
+        Self::ReplyParams<'service>,
+        Self::ReplyStream,
+        Self::ReplyError<'service>,
+    > {
+        let _ = (conn, fds);
+        let reply = match call.method() {
             CalculatorMethod::Add { a, b } => {
                 self.operations.push(format!("add({}, {})", a, b));
-                MethodReply::Single(Some(CalculatorReply::Result(CalculationResult { result: a + b })))
+                MethodReply::Single(Some(CalculatorReply::Result(
+                    CalculationResult { result: a + b },
+                )))
             }
             CalculatorMethod::Multiply { x, y } => {
                 self.operations.push(format!("multiply({}, {})", x, y));
-                MethodReply::Single(Some(CalculatorReply::Result(CalculationResult { result: x * y })))
+                MethodReply::Single(Some(CalculatorReply::Result(
+                    CalculationResult { result: x * y },
+                )))
             }
             CalculatorMethod::Divide { dividend, divisor } => {
                 if *divisor == 0.0 {
@@ -226,20 +236,25 @@ where
                         reason: "must be within range",
                     })
                 } else {
-                    self.operations.push(format!("divide({}, {})", dividend, divisor));
-                    MethodReply::Single(Some(CalculatorReply::Result(CalculationResult {
-                        result: dividend / divisor,
-                    })))
+                    self.operations
+                        .push(format!("divide({}, {})", dividend, divisor));
+                    MethodReply::Single(Some(CalculatorReply::Result(
+                        CalculationResult {
+                            result: dividend / divisor,
+                        },
+                    )))
                 }
             }
             CalculatorMethod::GetStats => {
-                let ops: Vec<&str> = self.operations.iter().map(|s| s.as_str()).collect();
+                let ops: Vec<&str> =
+                    self.operations.iter().map(|s| s.as_str()).collect();
                 MethodReply::Single(Some(CalculatorReply::Stats(Statistics {
                     count: self.operations.len() as u64,
                     operations: ops,
                 })))
             }
-        }
+        };
+        (reply, Vec::new())
     }
 }
 
