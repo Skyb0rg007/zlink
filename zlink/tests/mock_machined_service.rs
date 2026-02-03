@@ -1,12 +1,10 @@
 //! Mock systemd-machined service for testing when real systemd services aren't available.
 
-#![cfg(all(feature = "introspection", feature = "idl-parse"))]
+#![cfg(all(feature = "service", feature = "introspection", feature = "idl-parse"))]
 
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "server")]
-use zlink::introspect::ReplyError as _;
 use zlink::{
     introspect::{self, CustomType, Type},
     ReplyError,
@@ -179,14 +177,29 @@ mod creds_utils;
 #[cfg(feature = "server")]
 mod server {
     use super::*;
-    use serde_prefix_all::prefix_all;
-    use zlink::{
-        connection::{socket::FetchPeerCredentials, Socket},
-        idl::{self, Comment, Interface, Parameter},
-        service::MethodReply,
-        varlink_service::{self, Error, Info, InterfaceDescription},
-        Call, Connection, Service,
-    };
+    use zlink::connection::socket::FetchPeerCredentials;
+
+    /// Owned version of ProcessId for use in service method parameters.
+    /// The service macro clones parameters, so we need owned types.
+    /// Named `ProcessId` to match the IDL output of the real machined service.
+    #[allow(dead_code)]
+    #[derive(Debug, Clone, Deserialize, CustomType)]
+    pub struct ProcessId {
+        pub pid: i64,
+        #[serde(rename = "pidfdId")]
+        pub pidfd_id: Option<u64>,
+        #[serde(rename = "bootId")]
+        pub boot_id: Option<String>,
+    }
+
+    /// Reply for Open method.
+    #[derive(Debug, Clone, Serialize, Deserialize, zlink::introspect::Type)]
+    pub struct OpenReply {
+        #[serde(rename = "ptyFileDescriptor")]
+        pub pty_file_descriptor: i64,
+        #[serde(rename = "ptyPath")]
+        pub pty_path: String,
+    }
 
     /// Mock systemd-machined service that serves hardcoded responses.
     pub struct MockMachinedService;
@@ -198,230 +211,129 @@ mod server {
         }
     }
 
-    /// Combined method enum for both varlink service and Machine methods.
-    #[derive(Debug, Deserialize)]
-    #[serde(untagged)]
-    pub enum Method<'a> {
-        #[serde(borrow)]
-        VarlinkService(varlink_service::Method<'a>),
-        #[serde(borrow)]
-        Machine(MachineMethod<'a>),
-    }
-
-    /// Machine interface methods.
-    #[prefix_all("io.systemd.Machine.")]
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "method", content = "parameters")]
-    #[allow(dead_code)]
-    pub enum MachineMethod<'a> {
-        Register {
-            name: &'a str,
-            id: Option<&'a str>,
-            service: Option<&'a str>,
-            class: &'a str,
-            leader: Option<u32>,
-            #[serde(rename = "leaderProcessId")]
-            leader_process_id: Option<ProcessId<'a>>,
-            #[serde(rename = "rootDirectory")]
-            root_directory: Option<&'a str>,
-            #[serde(rename = "ifIndices")]
-            if_indices: Option<Vec<u64>>,
-            #[serde(rename = "vSockCid")]
-            v_sock_cid: Option<u64>,
-            #[serde(rename = "sshAddress")]
-            ssh_address: Option<&'a str>,
-            #[serde(rename = "sshPrivateKeyPath")]
-            ssh_private_key_path: Option<&'a str>,
-            #[serde(rename = "allocateUnit")]
-            allocate_unit: Option<bool>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-        },
-        Unregister {
-            name: Option<&'a str>,
-            pid: Option<ProcessId<'a>>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-        },
-        Terminate {
-            name: Option<&'a str>,
-            pid: Option<ProcessId<'a>>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-        },
-        Kill {
-            name: Option<&'a str>,
-            pid: Option<ProcessId<'a>>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-            whom: Option<&'a str>,
-            signal: i64,
-        },
-        List {
-            name: Option<&'a str>,
-            pid: Option<ProcessId<'a>>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-            #[serde(rename = "acquireMetadata")]
-            acquire_metadata: Option<AcquireMetadata>,
-        },
-        Open {
-            name: Option<&'a str>,
-            pid: Option<ProcessId<'a>>,
-            #[serde(rename = "allowInteractiveAuthentication")]
-            allow_interactive_authentication: Option<bool>,
-            mode: MachineOpenMode,
-            user: Option<&'a str>,
-            path: Option<&'a str>,
-            args: Option<Vec<&'a str>>,
-            environment: Option<Vec<&'a str>>,
-        },
-    }
-
-    /// Combined reply enum for both varlink service and Machine replies.
-    #[derive(Debug, Serialize)]
-    #[serde(untagged)]
-    pub enum Reply<'ser> {
-        #[serde(borrow)]
-        VarlinkService(varlink_service::Reply<'ser>),
-        Machine(MachineReply<'ser>),
-    }
-
-    /// Machine interface replies.
-    #[derive(Debug, Serialize)]
-    #[serde(untagged)]
-    pub enum MachineReply<'a> {
-        List(ListReply<'a>),
-        Open(OpenReply),
-    }
-
-    #[derive(Debug, Serialize, Deserialize, Type)]
-    pub struct OpenReply {
-        #[serde(rename = "ptyFileDescriptor")]
-        pub pty_file_descriptor: i64,
-        #[serde(rename = "ptyPath")]
-        pub pty_path: String,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize)]
-    #[serde(untagged)]
-    pub enum MockError<'a> {
-        VarlinkService(Error<'a>),
-        #[allow(unused)]
-        Machined(MachinedError),
-    }
-
-    impl<Sock> Service<Sock> for MockMachinedService
+    #[zlink::service(
+        interface = "io.systemd.Machine",
+        vendor = "The systemd Project",
+        product = "systemd (systemd-machined)",
+        version = "257.5 (257.5-6.fc42)",
+        url = "https://systemd.io/",
+        types = [AcquireMetadata, MachineOpenMode, ProcessId, Timestamp, Address]
+    )]
+    impl<Sock> MockMachinedService
     where
-        Sock: Socket,
         Sock::ReadHalf: FetchPeerCredentials,
     {
-        type MethodCall<'de> = Method<'de>;
-        type ReplyParams<'ser>
-            = Reply<'ser>
-        where
-            Self: 'ser;
-        type ReplyStream = futures_util::stream::Empty<zlink::Reply<()>>;
-        type ReplyStreamParams = ();
-        type ReplyError<'ser>
-            = MockError<'ser>
-        where
-            Self: 'ser;
-
-        async fn handle<'service>(
-            &'service mut self,
-            call: &'service Call<Self::MethodCall<'_>>,
-            conn: &mut Connection<Sock>,
-        ) -> MethodReply<Self::ReplyParams<'service>, Self::ReplyStream, Self::ReplyError<'service>>
-        {
-            let Ok(creds) = conn.peer_credentials().await else {
-                return MethodReply::Error(MockError::Machined(
-                    MachinedError::FetchPeerCredentialsFailed,
-                ));
-            };
-            // Verify credentials match current process.
-            if creds_utils::verify_credentials(&creds).is_err() {
-                return MethodReply::Error(MockError::Machined(
-                    MachinedError::FetchPeerCredentialsFailed,
-                ));
-            }
-
-            match call.method() {
-                Method::VarlinkService(varlink_service::Method::GetInfo) => {
-                    // Return hardcoded info that matches the systemd machine service
-                    let interfaces = vec![
-                        "io.systemd",
-                        "io.systemd.Machine",
-                        "io.systemd.MachineImage",
-                        "org.varlink.service",
-                    ];
-
-                    let info = Info::new(
-                        "The systemd Project",
-                        "systemd (systemd-machined)",
-                        "257.5 (257.5-6.fc42)",
-                        "https://systemd.io/",
-                        interfaces,
-                    );
-
-                    MethodReply::Single(Some(Reply::VarlinkService(varlink_service::Reply::Info(
-                        info,
-                    ))))
-                }
-                Method::VarlinkService(varlink_service::Method::GetInterfaceDescription {
-                    interface,
-                }) => {
-                    let description = match *interface {
-                        "org.varlink.service" => {
-                            InterfaceDescription::from(varlink_service::DESCRIPTION)
-                        }
-                        "io.systemd.Machine" => {
-                            InterfaceDescription::from(MACHINE_SERVICE_DESCRIPTION)
-                        }
-                        _ => {
-                            return MethodReply::Error(MockError::VarlinkService(
-                                Error::InterfaceNotFound {
-                                    interface: Cow::Borrowed(interface),
-                                },
-                            ))
-                        }
-                    };
-
-                    MethodReply::Single(Some(Reply::VarlinkService(
-                        varlink_service::Reply::InterfaceDescription(description),
-                    )))
-                }
-                Method::Machine(MachineMethod::Register { .. }) => {
-                    // For the mock, just return success (no parameters)
-                    MethodReply::Single(None)
-                }
-                Method::Machine(MachineMethod::Unregister { .. }) => {
-                    // For the mock, just return success (no parameters)
-                    MethodReply::Single(None)
-                }
-                Method::Machine(MachineMethod::Terminate { .. }) => {
-                    // For the mock, just return success (no parameters)
-                    MethodReply::Single(None)
-                }
-                Method::Machine(MachineMethod::Kill { .. }) => {
-                    // For the mock, just return success (no parameters)
-                    MethodReply::Single(None)
-                }
-                Method::Machine(MachineMethod::List { .. }) => {
-                    // Return a mock machine
-                    let list_reply = MOCK_LIST_REPLY.clone();
-                    MethodReply::Single(Some(Reply::Machine(MachineReply::List(list_reply))))
-                }
-                Method::Machine(MachineMethod::Open { .. }) => {
-                    // Return a mock PTY
-                    let open_reply = OpenReply {
-                        pty_file_descriptor: 42,
-                        pty_path: "/dev/pts/42".to_string(),
-                    };
-                    MethodReply::Single(Some(Reply::Machine(MachineReply::Open(open_reply))))
-                }
-            }
+        #[allow(clippy::too_many_arguments)]
+        async fn register(
+            &self,
+            _name: String,
+            _id: Option<String>,
+            _service: Option<String>,
+            _class: String,
+            _leader: Option<u32>,
+            #[zlink(rename = "leaderProcessId")] _leader_process_id: Option<ProcessId>,
+            #[zlink(rename = "rootDirectory")] _root_directory: Option<String>,
+            #[zlink(rename = "ifIndices")] _if_indices: Option<Vec<u64>>,
+            #[zlink(rename = "vSockCid")] _v_sock_cid: Option<u64>,
+            #[zlink(rename = "sshAddress")] _ssh_address: Option<String>,
+            #[zlink(rename = "sshPrivateKeyPath")] _ssh_private_key_path: Option<String>,
+            #[zlink(rename = "allocateUnit")] _allocate_unit: Option<bool>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<(), MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(())
         }
+
+        async fn unregister(
+            &self,
+            _name: Option<String>,
+            _pid: Option<ProcessId>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<(), MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(())
+        }
+
+        async fn terminate(
+            &self,
+            _name: Option<String>,
+            _pid: Option<ProcessId>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<(), MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(())
+        }
+
+        async fn kill(
+            &self,
+            _name: Option<String>,
+            _pid: Option<ProcessId>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            _whom: Option<String>,
+            _signal: i64,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<(), MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(())
+        }
+
+        async fn list(
+            &self,
+            _name: Option<String>,
+            _pid: Option<ProcessId>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            #[zlink(rename = "acquireMetadata")] _acquire_metadata: Option<AcquireMetadata>,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<ListReply<'static>, MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(MOCK_LIST_REPLY)
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        async fn open(
+            &self,
+            _name: Option<String>,
+            _pid: Option<ProcessId>,
+            #[zlink(rename = "allowInteractiveAuthentication")]
+            _allow_interactive_authentication: Option<bool>,
+            _mode: MachineOpenMode,
+            _user: Option<String>,
+            _path: Option<String>,
+            _args: Option<Vec<String>>,
+            _environment: Option<Vec<String>>,
+            #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
+        ) -> Result<OpenReply, MachinedError> {
+            verify_credentials(conn).await?;
+            Ok(OpenReply {
+                pty_file_descriptor: 42,
+                pty_path: "/dev/pts/42".to_string(),
+            })
+        }
+    }
+
+    async fn verify_credentials<Sock>(
+        conn: &mut zlink::Connection<Sock>,
+    ) -> Result<(), MachinedError>
+    where
+        Sock: zlink::connection::Socket,
+        Sock::ReadHalf: FetchPeerCredentials,
+    {
+        let Ok(creds) = conn.peer_credentials().await else {
+            return Err(MachinedError::FetchPeerCredentialsFailed);
+        };
+        // Verify credentials match current process.
+        if creds_utils::verify_credentials(&creds).is_err() {
+            return Err(MachinedError::FetchPeerCredentialsFailed);
+        }
+        Ok(())
     }
 
     const MOCK_LIST_REPLY: ListReply<'static> = ListReply {
@@ -429,13 +341,13 @@ mod server {
         id: Some("1234567890abcdef1234567890abcdef"),
         service: Some("mock-service"),
         class: "host",
-        leader: Some(ProcessId {
+        leader: Some(super::ProcessId {
             pid: 12345,
             pidfd_id: None,
             boot_id: None,
         }),
         root_directory: Some("/var/lib/machines/test-machine"),
-        unit: Some(Cow::Borrowed("machine-test\\x2dmachine.scope")), // Needs escaping
+        unit: Some(Cow::Borrowed("machine-test\\x2dmachine.scope")),
         timestamp: Some(Timestamp {
             realtime: Some(1234567890000000),
             monotonic: Some(9876543210000),
@@ -446,266 +358,6 @@ mod server {
         addresses: None,
         os_release: None,
         uid_shift: None,
-    };
-
-    /// Interface definition for io.systemd.Machine matching the actual systemd-machined service.
-    const MACHINE_SERVICE_DESCRIPTION: &Interface<'static> = &{
-        const PROCESS_ID_TYPE: &idl::Type<'static> = <Option<ProcessId>>::TYPE;
-        const ACQUIRE_METADATA_TYPE: &idl::Type<'static> = <Option<AcquireMetadata>>::TYPE;
-
-        // Method definitions with scoped parameters
-        const REGISTER_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new("name", <&str>::TYPE, &[]),
-                &Parameter::new("id", <Option<&str>>::TYPE, &[]),
-                &Parameter::new("service", <Option<&str>>::TYPE, &[]),
-                &Parameter::new("class", <&str>::TYPE, &[]),
-                &Parameter::new(
-                    "leader",
-                    <Option<u32>>::TYPE,
-                    &[&Comment::new("The leader PID as simple positive integer.")],
-                ),
-                &Parameter::new(
-                    "leaderProcessId",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("The leader PID as ProcessId structure.")],
-                ),
-                &Parameter::new("rootDirectory", <Option<&str>>::TYPE, &[]),
-                &Parameter::new("ifIndices", <Option<&[u64]>>::TYPE, &[]),
-                &Parameter::new("vSockCid", <Option<u64>>::TYPE, &[]),
-                &Parameter::new("sshAddress", <Option<&str>>::TYPE, &[]),
-                &Parameter::new("sshPrivateKeyPath", <Option<&str>>::TYPE, &[]),
-                &Parameter::new(
-                    "allocateUnit",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new(
-                        "Controls whether to allocate a scope unit for the machine to register.",
-                    )],
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-            ];
-            idl::Method::new("Register", PARAMS, &[], &[])
-        };
-
-        const UNREGISTER_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new(
-                    "name",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("If non-null the name of a machine")],
-                ),
-                &Parameter::new(
-                    "pid",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("If non-null the PID of a machine. Special value 0 means to take pid of the machine the caller is part of")]
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-            ];
-            idl::Method::new("Unregister", PARAMS, &[], &[])
-        };
-
-        const TERMINATE_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new(
-                    "name",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("If non-null the name of a machine")],
-                ),
-                &Parameter::new(
-                    "pid",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("If non-null the PID of a machine. Special value 0 means to take pid of the machine the caller is part of")]
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-            ];
-            idl::Method::new(
-                "Terminate",
-                PARAMS,
-                &[],
-                &[&Comment::new("Terminate machine, killing its processes")],
-            )
-        };
-
-        const KILL_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new(
-                    "name",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("If non-null the name of a machine")],
-                ),
-                &Parameter::new(
-                    "pid",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("If non-null the PID of a machine. Special value 0 means to take pid of the machine the caller is part of")]
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-                &Parameter::new(
-                    "whom",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("Identifier that specifies what precisely to send the signal to (either 'leader' or 'all').")]
-                ),
-                &Parameter::new(
-                    "signal",
-                    <i64>::TYPE,
-                    &[&Comment::new("Numeric UNIX signal integer.")],
-                ),
-            ];
-            idl::Method::new(
-                "Kill",
-                PARAMS,
-                &[],
-                &[&Comment::new(
-                    "Send a UNIX signal to the machine's processes",
-                )],
-            )
-        };
-
-        const LIST_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new(
-                    "name",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("If non-null the name of a machine")],
-                ),
-                &Parameter::new(
-                    "pid",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("If non-null the PID of a machine. Special value 0 means to take pid of the machine the caller is part of")]
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-                &Parameter::new(
-                    "acquireMetadata",
-                    ACQUIRE_METADATA_TYPE,
-                    &[&Comment::new("If 'yes' the output will include machine metadata fields such as 'Addresses', 'OSRelease', and 'UIDShift'. If 'graceful' it's equal to true but gracefully eats up errors")]
-                ),
-            ];
-
-            // Use the ListReply TYPE to get the fields
-            let output_params = ListReply::TYPE.as_object().unwrap().as_borrowed().unwrap();
-
-            idl::Method::new(
-                "List",
-                PARAMS,
-                output_params,
-                &[
-                    &Comment::new("List running machines"),
-                    &Comment::new("[Supports 'more' flag]"),
-                ],
-            )
-        };
-
-        const OPEN_METHOD: &idl::Method<'static> = &{
-            const PARAMS: &[&Parameter<'static>] = &[
-                &Parameter::new(
-                    "name",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new("If non-null the name of a machine")],
-                ),
-                &Parameter::new(
-                    "pid",
-                    PROCESS_ID_TYPE,
-                    &[&Comment::new("If non-null the PID of a machine. Special value 0 means to take pid of the machine the caller is part of")]
-                ),
-                &Parameter::new(
-                    "allowInteractiveAuthentication",
-                    <Option<bool>>::TYPE,
-                    &[&Comment::new("Controls whether interactive authentication (via polkit) shall be allowed. If unspecified defaults to false")]
-                ),
-                &Parameter::new(
-                    "mode",
-                    MachineOpenMode::TYPE,
-                    &[&Comment::new(
-                        "There are three possible values: 'tty', 'login', and 'shell'.",
-                    )],
-                ),
-                &Parameter::new(
-                    "user",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new(
-                        "See description of mode='shell'. Valid only when mode='shell'",
-                    )],
-                ),
-                &Parameter::new(
-                    "path",
-                    <Option<&str>>::TYPE,
-                    &[&Comment::new(
-                        "See description of mode='shell'. Valid only when mode='shell'",
-                    )],
-                ),
-                &Parameter::new(
-                    "args",
-                    <Option<&[&str]>>::TYPE,
-                    &[&Comment::new(
-                        "See description of mode='shell'. Valid only when mode='shell'",
-                    )],
-                ),
-                &Parameter::new(
-                    "environment",
-                    <Option<&[&str]>>::TYPE,
-                    &[&Comment::new(
-                        "See description of mode='shell'. Valid only when mode='shell'",
-                    )],
-                ),
-            ];
-
-            // Use the OpenReply TYPE to get the fields
-            let output_params = OpenReply::TYPE.as_object().unwrap().as_borrowed().unwrap();
-
-            idl::Method::new(
-                "Open",
-                PARAMS,
-                output_params,
-                &[&Comment::new(
-                    "Allocates a pseudo TTY in the container in various modes",
-                )],
-            )
-        };
-
-        const METHODS: &[&idl::Method<'static>] = &[
-            REGISTER_METHOD,
-            UNREGISTER_METHOD,
-            TERMINATE_METHOD,
-            KILL_METHOD,
-            LIST_METHOD,
-            OPEN_METHOD,
-        ];
-
-        // Use the custom types from their CUSTOM_TYPE implementations
-        const CUSTOM_TYPES: &[&idl::CustomType<'static>] = &[
-            AcquireMetadata::CUSTOM_TYPE,
-            MachineOpenMode::CUSTOM_TYPE,
-            ProcessId::CUSTOM_TYPE,
-            Timestamp::CUSTOM_TYPE,
-            Address::CUSTOM_TYPE,
-        ];
-
-        Interface::new(
-            "io.systemd.Machine",
-            METHODS,
-            CUSTOM_TYPES,
-            MachinedError::VARIANTS,
-            &[&Comment::new("systemd machine management interface")],
-        )
     };
 }
 

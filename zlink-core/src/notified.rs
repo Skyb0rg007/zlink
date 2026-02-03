@@ -29,24 +29,7 @@ where
 
     /// Get a stream of replies for this state.
     fn stream(&self) -> Self::Stream;
-}
 
-/// Trait for a one-shot notification (useful for method call handlers).
-///
-/// This is useful for handling method calls in a separate task/thread, where the result is sent
-/// back once.
-pub trait Once<ReplyParams>: Sized
-where
-    ReplyParams: Send + 'static + Debug,
-{
-    /// The stream type returned by [`new`](Self::new).
-    type Stream: futures_util::Stream<Item = Reply<ReplyParams>>;
-
-    /// Create a new one-shot notifier and its corresponding stream.
-    fn new() -> (Self, Self::Stream);
-
-    /// Send the notification value. Consumes self.
-    fn notify<T>(self, value: T)
-    where
-        T: Into<ReplyParams> + Debug;
+    /// Get a stream of replies for this state, that only yields one reply: the current state.
+    fn stream_once(&self) -> Self::Stream;
 }

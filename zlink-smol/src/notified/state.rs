@@ -66,6 +66,16 @@ where
         Stream {
             inner: self.inactive_rx.activate_cloned(),
             cached: None,
+            once: false,
+        }
+    }
+
+    /// A stream of replies for this state, that only yields one reply: the current state.
+    fn stream_once(&self) -> Stream<ReplyParams> {
+        Stream {
+            inner: self.inactive_rx.activate_cloned(),
+            cached: Some(self.get().into()),
+            once: true,
         }
     }
 }
@@ -78,6 +88,7 @@ pin_project! {
         #[pin]
         inner: BroadcastReceiver<ReplyParams>,
         cached: Option<ReplyParams>,
+        once: bool,
     }
 }
 
@@ -89,6 +100,13 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
+        if *this.once {
+            return Poll::Ready(
+                this.cached
+                    .take()
+                    .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
+            );
+        }
         match futures_util::ready!(this.inner.poll_next(cx)) {
             Some(reply) => {
                 // Cache and yield immediately with continues=true.

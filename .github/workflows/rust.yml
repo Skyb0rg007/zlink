@@ -95,10 +95,10 @@ jobs:
         run: |
           cargo test --release --all-features
           cargo test -p zlink-core --release --no-default-features \
-          --features idl-parse,server,proxy,defmt
+          --features idl-parse,service,proxy,defmt
           # Test the smol support
           cargo test -p zlink --release --no-default-features \
-          --features tracing,smol,proxy,introspection,idl-parse,server
+          --features tracing,smol,proxy,introspection,idl-parse,service
 
   # Test the `zlink-core`'s tests with miri.
   #
@@ -121,7 +121,7 @@ jobs:
       - name: Test zlink-core with miri
         run: |
           cargo miri test -p zlink-core --release --no-default-features \
-          --features idl-parse,server,proxy,defmt -- \
+          --features idl-parse,service,proxy,defmt -- \
           round_robin \
           empty_select_all \
           all_futures_pending \

@@ -26,6 +26,14 @@ pub(super) struct MethodInfo {
     pub error_type: Option<Type>,
     /// The method body tokens (for inlining methods with connection params).
     pub body: TokenStream,
+    /// Whether this method returns a stream of replies (has `#[zlink(more)]`).
+    pub is_streaming: bool,
+    /// The item type of the stream (the `T` in `Stream<Item = Reply<T>>`).
+    pub stream_item_type: Option<Type>,
+    /// The full return type for streaming methods (for generating enum variants).
+    pub stream_return_type: Option<Type>,
+    /// Whether the streaming method returns `impl Trait` (requires boxing).
+    pub stream_uses_impl_trait: bool,
 }
 
 impl MethodInfo {
@@ -50,13 +58,17 @@ impl MethodInfo {
             .rename
             .unwrap_or_else(|| snake_case_to_pascal_case(&name.to_string()));
 
+        // Check if this is a streaming method.
+        let is_streaming = method_attrs.is_streaming;
+
         // Extract parameters (skip self).
-        let params = method
+        let params: Vec<ParamInfo> = method
             .sig
             .inputs
             .iter()
             .skip(1)
-            .filter_map(|arg| {
+            .enumerate()
+            .filter_map(|(idx, arg)| {
                 let mut param_info = ParamInfo::from_fn_arg(arg)?;
                 // Try to extract zlink attributes from the parameter.
                 if let syn::FnArg::Typed(pat_type) = arg {
@@ -64,18 +76,88 @@ impl MethodInfo {
                     param_info.serialized_name = param_attrs.rename;
                     param_info.is_connection = param_attrs.is_connection;
                 }
+                // For streaming methods, the first param must be `more: bool`.
+                if is_streaming && idx == 0 {
+                    param_info.is_more = true;
+                }
                 Some(param_info)
             })
             .collect();
 
-        // Extract return type and check if it's a Result.
-        let (return_type, returns_result, error_type) = match &method.sig.output {
-            ReturnType::Default => (None, false, None),
-            ReturnType::Type(_, ty) => {
-                if let Some((inner_ty, err_ty)) = extract_result_types(ty) {
-                    (inner_ty, true, Some(err_ty))
-                } else {
-                    (Some((**ty).clone()), false, None)
+        // For streaming methods, validate the `more` parameter.
+        if is_streaming {
+            let first_param = params.first().ok_or_else(|| {
+                Error::new_spanned(
+                    &method.sig,
+                    "streaming methods must have `more: bool` as the first parameter after `self`",
+                )
+            })?;
+            if !is_bool_type(&first_param.ty) {
+                return Err(Error::new_spanned(
+                    &method.sig.inputs,
+                    "streaming methods must have `more: bool` as the first parameter after `self`",
+                ));
+            }
+        }
+
+        // Extract return type and check if it's a Result or Stream.
+        let (
+            return_type,
+            returns_result,
+            error_type,
+            stream_item_type,
+            stream_return_type,
+            stream_uses_impl_trait,
+        ) = if is_streaming {
+            // For streaming methods, extract the Stream's Item type.
+            // Streaming methods can return either:
+            // - `impl Stream<Item = Reply<T>>` (will use boxing)
+            // - A concrete type implementing Stream (can avoid boxing)
+            match &method.sig.output {
+                ReturnType::Default => {
+                    return Err(Error::new_spanned(
+                        &method.sig,
+                        "streaming methods must return a Stream<Item = Reply<T>>",
+                    ))
+                }
+                ReturnType::Type(_, ty) => {
+                    let stream_item = extract_stream_item_type(ty).ok_or_else(|| {
+                        Error::new_spanned(
+                            ty,
+                            "streaming methods must return a Stream<Item = Reply<T>> \
+                             (could not extract Stream's Item type)",
+                        )
+                    })?;
+                    // Extract T from Reply<T>.
+                    let inner_type = extract_reply_inner_type(&stream_item).ok_or_else(|| {
+                        Error::new_spanned(
+                            ty,
+                            "streaming methods must return a Stream<Item = Reply<T>> \
+                             (stream item must be Reply<T>)",
+                        )
+                    })?;
+                    // Check if return type uses `impl Trait`.
+                    let uses_impl_trait = matches!(**ty, Type::ImplTrait(_));
+                    (
+                        None,
+                        false,
+                        None,
+                        Some(inner_type),
+                        Some((**ty).clone()),
+                        uses_impl_trait,
+                    )
+                }
+            }
+        } else {
+            // For non-streaming methods, extract Result types as before.
+            match &method.sig.output {
+                ReturnType::Default => (None, false, None, None, None, false),
+                ReturnType::Type(_, ty) => {
+                    if let Some((inner_ty, err_ty)) = extract_result_types(ty) {
+                        (inner_ty, true, Some(err_ty), None, None, false)
+                    } else {
+                        (Some((**ty).clone()), false, None, None, None, false)
+                    }
                 }
             }
         };
@@ -93,6 +175,10 @@ impl MethodInfo {
             returns_result,
             error_type,
             body,
+            is_streaming,
+            stream_item_type,
+            stream_return_type,
+            stream_uses_impl_trait,
         })
     }
 
@@ -108,9 +194,11 @@ impl MethodInfo {
         self.params.iter().any(|p| p.is_connection)
     }
 
-    /// Get parameters that are not connection parameters (for serialization).
+    /// Get parameters that are serialized (excludes connection and more parameters).
     pub(super) fn serialized_params(&self) -> impl Iterator<Item = &ParamInfo> {
-        self.params.iter().filter(|p| !p.is_connection)
+        self.params
+            .iter()
+            .filter(|p| !p.is_connection && !p.is_more)
     }
 }
 
@@ -121,6 +209,8 @@ struct MethodAttrs {
     interface: Option<String>,
     /// Custom method name.
     rename: Option<String>,
+    /// Whether this method returns a stream of replies.
+    is_streaming: bool,
 }
 
 impl MethodAttrs {
@@ -179,6 +269,12 @@ impl MethodAttrs {
                             ));
                         };
                         result.rename = Some(lit_str.value());
+                    }
+                    Meta::Path(path) if path.is_ident("more") => {
+                        if result.is_streaming {
+                            return Err(Error::new_spanned(&meta, "duplicate `more` attribute"));
+                        }
+                        result.is_streaming = true;
                     }
                     _ => {
                         return Err(Error::new_spanned(&meta, "unknown zlink attribute"));
@@ -298,4 +394,111 @@ fn extract_result_types(ty: &Type) -> Option<(Option<Type>, Type)> {
     };
 
     Some((ok_type, err_type.clone()))
+}
+
+/// Extract the `Item` type from `impl Stream<Item = T>` or similar stream types.
+/// Returns `None` if the type is not a recognizable stream type.
+///
+/// For `impl Stream<Item = Reply<T>>`, returns `Reply<T>`.
+/// For concrete types like `SomeStream<T>`, returns `Reply<T>` (assuming the generic param is T).
+fn extract_stream_item_type(ty: &Type) -> Option<Type> {
+    match ty {
+        // Handle `impl Stream<Item = T> + ...` (impl trait syntax).
+        Type::ImplTrait(impl_trait) => {
+            for bound in &impl_trait.bounds {
+                if let syn::TypeParamBound::Trait(trait_bound) = bound {
+                    if let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound) {
+                        return Some(item_type);
+                    }
+                }
+            }
+            None
+        }
+        // Handle dyn trait syntax (e.g., `Box<dyn Stream<Item = T>>`).
+        Type::TraitObject(trait_object) => {
+            for bound in &trait_object.bounds {
+                if let syn::TypeParamBound::Trait(trait_bound) = bound {
+                    if let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound) {
+                        return Some(item_type);
+                    }
+                }
+            }
+            None
+        }
+        // Handle concrete path types like `notified::Stream<T>` or `SomeStream<T>`.
+        // For these, we assume the first generic parameter is the stream item type T,
+        // and the stream yields `Reply<T>`.
+        Type::Path(type_path) => {
+            let last_segment = type_path.path.segments.last()?;
+            let PathArguments::AngleBracketed(args) = &last_segment.arguments else {
+                return None;
+            };
+            // Get the first generic argument as the item type.
+            let first_arg = args.args.first()?;
+            let GenericArgument::Type(item_type) = first_arg else {
+                return None;
+            };
+            // Wrap it in Reply<T> since concrete stream types yield Reply<T>.
+            Some(syn::parse_quote!(Reply<#item_type>))
+        }
+        _ => None,
+    }
+}
+
+/// Extract the `Item` type from a trait bound like `Stream<Item = T>`.
+fn extract_stream_item_from_trait_bound(trait_bound: &syn::TraitBound) -> Option<Type> {
+    // Check if this is a Stream trait.
+    let last_segment = trait_bound.path.segments.last()?;
+    if last_segment.ident != "Stream" {
+        return None;
+    }
+
+    // Get the angle-bracketed arguments.
+    let PathArguments::AngleBracketed(args) = &last_segment.arguments else {
+        return None;
+    };
+
+    // Find the `Item = T` binding.
+    for arg in &args.args {
+        if let GenericArgument::AssocType(assoc_type) = arg {
+            if assoc_type.ident == "Item" {
+                return Some(assoc_type.ty.clone());
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract the inner type `T` from `Reply<T>`.
+/// Returns `None` if the type is not a `Reply<T>`.
+fn extract_reply_inner_type(ty: &Type) -> Option<Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Reply" {
+        return None;
+    }
+
+    let PathArguments::AngleBracketed(args) = &last_segment.arguments else {
+        return None;
+    };
+
+    // Get the first generic argument (the inner type).
+    let first_arg = args.args.first()?;
+    let GenericArgument::Type(inner_type) = first_arg else {
+        return None;
+    };
+
+    Some(inner_type.clone())
+}
+
+/// Check if a type is `bool`.
+fn is_bool_type(ty: &Type) -> bool {
+    let Type::Path(type_path) = ty else {
+        return false;
+    };
+    type_path.path.is_ident("bool")
 }
