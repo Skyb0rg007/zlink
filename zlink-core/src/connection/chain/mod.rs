@@ -590,8 +590,8 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "std")]
     #[tokio::test]
+    #[cfg(feature = "std")]
     async fn chain_from_iter_with_fds() -> crate::Result<()> {
         use crate::{
             connection::socket::{ReadHalf, WriteHalf},

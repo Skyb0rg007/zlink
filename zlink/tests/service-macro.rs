@@ -767,3 +767,411 @@ trait StreamingProxy {
         &mut self,
     ) -> zlink::Result<impl futures_util::Stream<Item = zlink::Result<Result<StreamValue, ()>>>>;
 }
+
+// ============================================================================
+// Test file descriptor passing with service macro
+// ============================================================================
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn service_macro_fd_passing() -> Result<(), Box<dyn std::error::Error>> {
+    let socket_path = "/tmp/zlink-service-macro-fd-test.sock";
+    if let Err(e) = tokio::fs::remove_file(socket_path).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(e.into());
+        }
+    }
+
+    let listener = bind(socket_path).unwrap();
+    let service = FdService;
+    let server = Server::new(listener, service);
+    tokio::select! {
+        res = server.run() => res?,
+        res = run_fd_client(socket_path) => res?,
+    }
+
+    Ok(())
+}
+
+async fn run_fd_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+    };
+
+    let mut conn = connect(socket_path).await?;
+
+    // Send multiple FDs and read from a specific one by index.
+    let (r0, mut w0) = UnixStream::pair()?;
+    let (r1, mut w1) = UnixStream::pair()?;
+    let (r2, mut w2) = UnixStream::pair()?;
+    w0.write_all(b"data-zero")?;
+    w1.write_all(b"data-one")?;
+    w2.write_all(b"data-two")?;
+    drop((w0, w1, w2));
+    let fds = vec![r0.into(), r1.into(), r2.into()];
+    // Read from index 1.
+    let data = conn.read_fd(1, fds).await?.unwrap();
+    assert_eq!(data, "data-one");
+
+    // Invalid index returns an error.
+    let (r, mut w) = UnixStream::pair()?;
+    w.write_all(b"some data")?;
+    drop(w);
+    let result = conn.read_fd(5, vec![r.into()]).await?;
+    assert!(matches!(result, Err(FdError::InvalidIndex { index: 5 })));
+
+    // Receive FDs from the service. Each handle has a name and fd_index referencing the FD vector.
+    let names = vec!["config.txt".into(), "data.bin".into(), "log.txt".into()];
+    let (result, fds) = conn.open_fds(names).await?;
+    let handles = result.unwrap();
+    assert_eq!(handles.len(), 3);
+    assert_eq!(fds.len(), 3);
+    // Verify each handle's name and that the FD at fd_index contains the name as content.
+    for handle in &handles {
+        let fd = &fds[handle.fd_index as usize];
+        let cloned_fd = fd.try_clone()?;
+        let mut stream = UnixStream::from(cloned_fd);
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf)?;
+        assert_eq!(buf, handle.name);
+    }
+
+    // Receive zero FDs from the service.
+    let (result, fds) = conn.open_fds(Vec::new()).await?;
+    let handles = result.unwrap();
+    assert!(handles.is_empty());
+    assert!(fds.is_empty());
+
+    // Receive an FD on success path and verify the handle's index references the correct FD.
+    let (result, fds) = conn.try_open_fd("success.txt".into(), false).await?;
+    let handle = result.unwrap();
+    assert_eq!(handle.name, "success.txt");
+    assert_eq!(handle.fd_index, 0);
+    assert_eq!(fds.len(), 1);
+    let mut stream = UnixStream::from(fds.into_iter().next().unwrap());
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf)?;
+    assert_eq!(buf, "success.txt");
+
+    // Receive an FD on error path and verify the diagnostic content.
+    let (result, fds) = conn.try_open_fd("missing.txt".into(), true).await?;
+    let err = result.unwrap_err();
+    assert!(matches!(err, FdError::NotFound { name } if name == "missing.txt"));
+    assert_eq!(fds.len(), 1);
+    let mut stream = UnixStream::from(fds.into_iter().next().unwrap());
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf)?;
+    assert_eq!(buf, "error-diagnostic");
+
+    Ok(())
+}
+
+// Response type for FD operations. The `fd_index` field references a position in the FD vector.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct FdHandle {
+    name: String,
+    fd_index: u32,
+}
+
+// Error type for FD operations.
+#[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
+#[zlink(interface = "org.example.fd")]
+enum FdError {
+    InvalidIndex { index: u32 },
+    NotFound { name: String },
+}
+
+// A service that tests file descriptor passing.
+struct FdService;
+
+#[zlink::service(interface = "org.example.fd")]
+impl FdService {
+    /// Receive FDs and read from the one at the given index.
+    async fn read_fd(
+        &self,
+        fd_index: u32,
+        #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
+    ) -> Result<String, FdError> {
+        use std::{io::Read, os::unix::net::UnixStream};
+
+        let Some(fd) = fds.into_iter().nth(fd_index as usize) else {
+            return Err(FdError::InvalidIndex { index: fd_index });
+        };
+        let mut stream = UnixStream::from(fd);
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).unwrap();
+        Ok(buf)
+    }
+
+    /// Open a list of named FDs and return handles with their indexes.
+    #[zlink(return_fds)]
+    async fn open_fds(&self, names: Vec<String>) -> (Vec<FdHandle>, Vec<std::os::fd::OwnedFd>) {
+        use std::{io::Write, os::unix::net::UnixStream};
+
+        let mut handles = Vec::new();
+        let mut fds = Vec::new();
+        for (i, name) in names.into_iter().enumerate() {
+            let (r, mut w) = UnixStream::pair().unwrap();
+            // Write the name as the FD content for verification.
+            w.write_all(name.as_bytes()).unwrap();
+            drop(w);
+            handles.push(FdHandle {
+                name,
+                fd_index: i as u32,
+            });
+            fds.push(r.into());
+        }
+        (handles, fds)
+    }
+
+    /// Try to open an FD. On success, return the handle with its index. On error, return the
+    /// error alongside a diagnostic FD.
+    #[zlink(return_fds)]
+    async fn try_open_fd(
+        &self,
+        name: String,
+        should_fail: bool,
+    ) -> (Result<FdHandle, FdError>, Vec<std::os::fd::OwnedFd>) {
+        use std::{io::Write, os::unix::net::UnixStream};
+
+        let (r, mut w) = UnixStream::pair().unwrap();
+        if should_fail {
+            w.write_all(b"error-diagnostic").unwrap();
+            drop(w);
+            (
+                Err(FdError::NotFound { name }),
+                vec![std::os::fd::OwnedFd::from(r)],
+            )
+        } else {
+            w.write_all(name.as_bytes()).unwrap();
+            drop(w);
+            (
+                Ok(FdHandle { name, fd_index: 0 }),
+                vec![std::os::fd::OwnedFd::from(r)],
+            )
+        }
+    }
+}
+
+// Proxy for FD service.
+#[zlink::proxy("org.example.fd")]
+trait FdProxy {
+    async fn read_fd(
+        &mut self,
+        fd_index: u32,
+        #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
+    ) -> zlink::Result<Result<String, FdError>>;
+
+    #[zlink(return_fds)]
+    async fn open_fds(
+        &mut self,
+        names: Vec<String>,
+    ) -> zlink::Result<(Result<Vec<FdHandle>, FdError>, Vec<std::os::fd::OwnedFd>)>;
+
+    #[zlink(return_fds)]
+    async fn try_open_fd(
+        &mut self,
+        name: String,
+        should_fail: bool,
+    ) -> zlink::Result<(Result<FdHandle, FdError>, Vec<std::os::fd::OwnedFd>)>;
+}
+
+// ============================================================================
+// Test streaming service methods with FD passing (#[zlink(more, return_fds)])
+// ============================================================================
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn service_macro_streaming_with_fds() -> Result<(), Box<dyn std::error::Error>> {
+    let socket_path = "/tmp/zlink-service-macro-streaming-fd-test.sock";
+    if let Err(e) = tokio::fs::remove_file(socket_path).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(e.into());
+        }
+    }
+
+    let listener = bind(socket_path).unwrap();
+    let service = StreamingFdService;
+    let server = Server::new(listener, service);
+    tokio::select! {
+        res = server.run() => res?,
+        res = run_streaming_fd_client(socket_path) => res?,
+    }
+
+    Ok(())
+}
+
+async fn run_streaming_fd_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use futures_util::StreamExt;
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+    };
+
+    let mut conn = connect(socket_path).await?;
+
+    // =========================================================================
+    // Test 1: Stream output FDs (return_fds + more)
+    // =========================================================================
+    {
+        let names = vec![
+            "first".to_string(),
+            "second".to_string(),
+            "third".to_string(),
+        ];
+        let mut stream = std::pin::pin!(conn.stream_fds(names).await?);
+
+        // Collect all stream items.
+        let mut handles = Vec::new();
+        let mut all_fds = Vec::new();
+        while let Some(result) = stream.next().await {
+            let (result, fds) = result?;
+            let handle = result.unwrap();
+            handles.push(handle);
+            all_fds.extend(fds);
+        }
+
+        // Should have received 3 handles with 3 FDs.
+        assert_eq!(handles.len(), 3);
+        assert_eq!(all_fds.len(), 3);
+
+        // Verify each handle's FD contains the expected content.
+        for (i, handle) in handles.iter().enumerate() {
+            assert_eq!(handle.fd_index, i as u32);
+            let fd = all_fds[handle.fd_index as usize].try_clone()?;
+            let mut stream = UnixStream::from(fd);
+            let mut buf = String::new();
+            stream.read_to_string(&mut buf)?;
+            assert_eq!(buf, handle.name);
+        }
+    }
+
+    // =========================================================================
+    // Test 2: Stream input FDs (fds + more)
+    // =========================================================================
+    {
+        // Create 3 FDs with known content.
+        let (r0, mut w0) = UnixStream::pair()?;
+        let (r1, mut w1) = UnixStream::pair()?;
+        let (r2, mut w2) = UnixStream::pair()?;
+        w0.write_all(b"content-zero")?;
+        w1.write_all(b"content-one")?;
+        w2.write_all(b"content-two")?;
+        drop((w0, w1, w2));
+
+        let fds = vec![r0.into(), r1.into(), r2.into()];
+        let mut stream = std::pin::pin!(conn.read_fds_streaming(fds).await?);
+
+        // Collect all stream items.
+        let mut results = Vec::new();
+        while let Some(result) = stream.next().await {
+            let read_result = result?.unwrap();
+            results.push(read_result);
+        }
+
+        // Should have received 3 results.
+        assert_eq!(results.len(), 3);
+
+        // Verify each result has the expected content.
+        assert_eq!(results[0].fd_index, 0);
+        assert_eq!(results[0].content, "content-zero");
+        assert_eq!(results[1].fd_index, 1);
+        assert_eq!(results[1].content, "content-one");
+        assert_eq!(results[2].fd_index, 2);
+        assert_eq!(results[2].content, "content-two");
+    }
+
+    Ok(())
+}
+
+/// Response for streaming FD read operations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct FdReadResult {
+    fd_index: u32,
+    content: String,
+}
+
+/// A service that streams file descriptors.
+struct StreamingFdService;
+
+#[zlink::service(interface = "org.example.streaming_fd")]
+impl StreamingFdService {
+    /// Stream FDs with handles, one per name. Each stream item contains a handle and the FD.
+    #[zlink(more, return_fds)]
+    async fn stream_fds(
+        &self,
+        more: bool,
+        names: Vec<String>,
+    ) -> impl futures_util::Stream<Item = (zlink::Reply<FdHandle>, Vec<std::os::fd::OwnedFd>)> + Unpin
+    {
+        use std::{io::Write, os::unix::net::UnixStream};
+
+        // If more=false, only return the first item.
+        let names: Vec<String> = if more {
+            names
+        } else {
+            names.into_iter().take(1).collect()
+        };
+
+        let n = names.len();
+        futures_util::stream::iter(names.into_iter().enumerate().map(move |(i, name)| {
+            let (r, mut w) = UnixStream::pair().unwrap();
+            w.write_all(name.as_bytes()).unwrap();
+            drop(w);
+            let handle = FdHandle {
+                name,
+                fd_index: i as u32,
+            };
+            let reply = zlink::Reply::new(Some(handle)).set_continues(Some(i < n - 1));
+            (reply, vec![r.into()])
+        }))
+    }
+
+    /// Receive FDs and stream back the content read from each one.
+    #[zlink(more)]
+    async fn read_fds_streaming(
+        &self,
+        more: bool,
+        #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
+    ) -> impl futures_util::Stream<Item = zlink::Reply<FdReadResult>> + Unpin {
+        use std::{io::Read, os::unix::net::UnixStream};
+
+        // If more=false, only return the first result.
+        let fds: Vec<std::os::fd::OwnedFd> = if more {
+            fds
+        } else {
+            fds.into_iter().take(1).collect()
+        };
+
+        let n = fds.len();
+        futures_util::stream::iter(fds.into_iter().enumerate().map(move |(i, fd)| {
+            let mut stream = UnixStream::from(fd);
+            let mut content = String::new();
+            stream.read_to_string(&mut content).unwrap();
+            let result = FdReadResult {
+                fd_index: i as u32,
+                content,
+            };
+            zlink::Reply::new(Some(result)).set_continues(Some(i < n - 1))
+        }))
+    }
+}
+
+/// Proxy for streaming FD service.
+#[zlink::proxy("org.example.streaming_fd")]
+trait StreamingFdProxy {
+    #[zlink(more, return_fds)]
+    async fn stream_fds(
+        &mut self,
+        names: Vec<String>,
+    ) -> zlink::Result<
+        impl futures_util::Stream<
+            Item = zlink::Result<(Result<FdHandle, ()>, Vec<std::os::fd::OwnedFd>)>,
+        >,
+    >;
+
+    #[zlink(more)]
+    async fn read_fds_streaming(
+        &mut self,
+        #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
+    ) -> zlink::Result<impl futures_util::Stream<Item = zlink::Result<Result<FdReadResult, ()>>>>;
+}
