@@ -1,5 +1,7 @@
 //! Type implementations for primitive types.
 
+use alloc::string::String;
+
 use super::Type;
 use crate::idl;
 

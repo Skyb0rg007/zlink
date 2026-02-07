@@ -33,10 +33,12 @@ impl Type for core::time::Duration {
     const TYPE: &'static idl::Type<'static> = &idl::Type::Float;
 }
 
+#[cfg(feature = "std")]
 impl Type for std::time::Instant {
     const TYPE: &'static idl::Type<'static> = &idl::Type::Float;
 }
 
+#[cfg(feature = "std")]
 impl Type for std::time::SystemTime {
     const TYPE: &'static idl::Type<'static> = &idl::Type::Float;
 }
@@ -45,10 +47,12 @@ impl Type for std::time::SystemTime {
 // Path types
 // ============================================================================
 
+#[cfg(feature = "std")]
 impl Type for std::path::PathBuf {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
 
+#[cfg(feature = "std")]
 impl Type for std::path::Path {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
@@ -57,10 +61,12 @@ impl Type for std::path::Path {
 // OS string types
 // ============================================================================
 
+#[cfg(feature = "std")]
 impl Type for std::ffi::OsString {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
 
+#[cfg(feature = "std")]
 impl Type for std::ffi::OsStr {
     const TYPE: &'static idl::Type<'static> = &idl::Type::String;
 }
