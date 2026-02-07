@@ -13,11 +13,11 @@ default = ["std", "server", "proxy", "tracing"]
 std = ["dep:rustix", "dep:libc", "zlink-macros/std"]
 server = []
 proxy = ["zlink-macros/proxy"]
-service = ["server", "zlink-macros/service", "introspection"]
+service = ["server", "zlink-macros/service"]
 # IDL and introspection support
 idl = []
 idl-parse = ["idl", "dep:winnow", "zlink-macros/idl-parse"]
-introspection = ["std", "idl", "zlink-macros/introspection"]
+introspection = ["idl", "zlink-macros/introspection"]
 
 [dependencies]
 serde = { version = "1.0.218", default-features = false, features = ["derive", "alloc"] }
