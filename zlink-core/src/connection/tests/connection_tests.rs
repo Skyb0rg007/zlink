@@ -2,8 +2,8 @@
 
 use crate::{test_utils::mock_socket::MockSocket, Connection};
 
-#[cfg(feature = "std")]
 #[tokio::test]
+#[cfg(feature = "std")]
 async fn peer_credentials_mock_socket() {
     // Get the expected credentials of the current process.
     let expected_uid = rustix::process::getuid();

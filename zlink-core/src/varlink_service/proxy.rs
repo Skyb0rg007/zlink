@@ -84,12 +84,12 @@ use super::{Error, Info, InterfaceDescription, OwnedError, OwnedInfo};
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "std")]
 #[proxy(
     interface = "org.varlink.service",
     crate = "crate",
     chain_name = "Chain"
 )]
+#[cfg(feature = "std")]
 pub trait Proxy {
     /// Get information about a Varlink service.
     ///
