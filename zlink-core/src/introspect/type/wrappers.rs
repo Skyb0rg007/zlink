@@ -3,6 +3,13 @@
 //! This module contains implementations for types that transparently wrap other types,
 //! such as smart pointers, cells, and optional types.
 
+use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    rc::Rc,
+    sync::Arc,
+};
+
 use super::Type;
 use crate::{idl, idl::TypeRef};
 
@@ -22,11 +29,11 @@ impl<T: Type + ?Sized> Type for Box<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
-impl<T: Type + ?Sized> Type for std::rc::Rc<T> {
+impl<T: Type + ?Sized> Type for Rc<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
-impl<T: Type + ?Sized> Type for std::sync::Arc<T> {
+impl<T: Type + ?Sized> Type for Arc<T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }
 
@@ -46,6 +53,6 @@ impl<T: Type + ?Sized> Type for core::cell::RefCell<T> {
 // Cow type - transparent wrapper
 // ============================================================================
 
-impl<T: Type + ToOwned + ?Sized> Type for std::borrow::Cow<'_, T> {
+impl<T: Type + ToOwned + ?Sized> Type for Cow<'_, T> {
     const TYPE: &'static idl::Type<'static> = T::TYPE;
 }

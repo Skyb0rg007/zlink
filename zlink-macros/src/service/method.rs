@@ -112,6 +112,14 @@ impl MethodInfo {
                 "at most one `#[zlink(fds)]` parameter is allowed per method",
             ));
         }
+        #[cfg(not(feature = "std"))]
+        if !fds_params.is_empty() || return_fds {
+            return Err(Error::new_spanned(
+                &method.sig,
+                "FD-related attributes (`#[zlink(fds)]` and `#[zlink(return_fds)]`) \
+                 require the `std` feature to be enabled",
+            ));
+        }
 
         // Extract return type and check if it's a Result or Stream.
         let (
