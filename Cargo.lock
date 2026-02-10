@@ -2207,6 +2207,7 @@ dependencies = [
  "serde-prefix-all",
  "serde_json",
  "syn",
+ "test-log",
  "tokio",
  "zlink",
 ]
