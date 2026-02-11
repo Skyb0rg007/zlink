@@ -5,7 +5,13 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Process all IDL files.
-    let idl_files = ["test.idl", "calc.idl", "storage.idl", "camelcase.idl"];
+    let idl_files = [
+        "test.idl",
+        "calc.idl",
+        "storage.idl",
+        "camelcase.idl",
+        "anytype.idl",
+    ];
 
     // Read all IDL file contents first (they need to stay alive for Interface lifetimes).
     let mut contents = Vec::new();

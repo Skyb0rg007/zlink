@@ -356,4 +356,102 @@ mod tests {
         let result = conn.add(i64::MAX - 1, 1).await.unwrap().unwrap();
         assert_eq!(result.result, i64::MAX);
     }
+
+    #[tokio::test]
+    async fn test_anytype_proxy() {
+        let responses = [
+            // Response for SetConfig: returns an id.
+            json!({
+                "parameters": {
+                    "id": "config-1"
+                }
+            })
+            .to_string(),
+            // Response for GetConfig: returns a Config with various any values.
+            json!({
+                "parameters": {
+                    "config": {
+                        "name": "my-config",
+                        "metadata": {
+                            "version": 2,
+                            "features": ["a", "b"]
+                        },
+                        "extra": 42
+                    }
+                }
+            })
+            .to_string(),
+            // Response for GetConfig: metadata is a string, extra is null.
+            json!({
+                "parameters": {
+                    "config": {
+                        "name": "simple-config",
+                        "metadata": "just a string",
+                        "extra": null
+                    }
+                }
+            })
+            .to_string(),
+            // Response for ProcessData: returns an array as the any result.
+            json!({
+                "parameters": {
+                    "result": [1, "two", true, null]
+                }
+            })
+            .to_string(),
+            // Response for ProcessData: returns a nested object.
+            json!({
+                "parameters": {
+                    "result": {
+                        "nested": {
+                            "deep": true
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        ];
+
+        let socket =
+            MockSocket::with_responses(&responses.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let mut conn = Connection::new(socket);
+
+        // Test SetConfig with structured metadata.
+        let config = Config {
+            name: "my-config".to_string(),
+            metadata: json!({"version": 2, "features": ["a", "b"]}),
+            extra: Some(json!(42)),
+        };
+        let result = conn
+            .set_config(&config, &json!("extra-data"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.id, "config-1");
+
+        // Test GetConfig returns Config with object metadata.
+        let result = conn.get_config("config-1").await.unwrap().unwrap();
+        assert_eq!(result.config.name, "my-config");
+        assert_eq!(result.config.metadata["version"], 2);
+        assert_eq!(result.config.metadata["features"][0], "a");
+        assert_eq!(result.config.extra, Some(json!(42)));
+
+        // Test GetConfig with string metadata and null extra.
+        let result = conn.get_config("config-2").await.unwrap().unwrap();
+        assert_eq!(result.config.name, "simple-config");
+        assert_eq!(result.config.metadata, json!("just a string"));
+        assert_eq!(result.config.extra, None);
+
+        // Test ProcessData returning an array.
+        let result = conn.process_data(&json!("input")).await.unwrap().unwrap();
+        assert_eq!(result.result, json!([1, "two", true, null]));
+
+        // Test ProcessData returning a nested object.
+        let result = conn
+            .process_data(&json!({"key": "value"}))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.result["nested"]["deep"], true);
+    }
 }

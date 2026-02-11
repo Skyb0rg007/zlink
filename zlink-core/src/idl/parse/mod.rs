@@ -121,6 +121,7 @@ fn primitive_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<
         literal("float").map(|_| Type::Float),
         literal("string").map(|_| Type::String),
         literal("object").map(|_| Type::ForeignObject),
+        literal("any").map(|_| Type::Any),
     ))
     .parse_next(input)
 }

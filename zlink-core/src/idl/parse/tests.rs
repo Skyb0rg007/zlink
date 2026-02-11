@@ -12,6 +12,7 @@ fn parse_primitive_types() {
     assert_eq!(parse_type("float").unwrap(), Type::Float);
     assert_eq!(parse_type("string").unwrap(), Type::String);
     assert_eq!(parse_type("object").unwrap(), Type::ForeignObject);
+    assert_eq!(parse_type("any").unwrap(), Type::Any);
 }
 
 #[test]
@@ -774,6 +775,92 @@ method AnotherMethod() -> ()
     let comments: Vec<_> = errors[0].comments().collect();
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].text(), "No space after hash");
+}
+
+#[test]
+fn parse_any_composite_types() {
+    // Test optional any
+    match parse_type("?any").unwrap() {
+        Type::Optional(inner) => assert_eq!(*inner, Type::Any),
+        other => panic!("Expected optional any, got: {:?}", other),
+    }
+
+    // Test array of any
+    match parse_type("[]any").unwrap() {
+        Type::Array(inner) => assert_eq!(*inner, Type::Any),
+        other => panic!("Expected array of any, got: {:?}", other),
+    }
+
+    // Test map of any
+    match parse_type("[string]any").unwrap() {
+        Type::Map(inner) => assert_eq!(*inner, Type::Any),
+        other => panic!("Expected map of any, got: {:?}", other),
+    }
+
+    // Test nested: optional array of any
+    match parse_type("?[]any").unwrap() {
+        Type::Optional(optional) => match &*optional {
+            Type::Array(array) => assert_eq!(*array, Type::Any),
+            other => panic!("Expected array inside optional, got: {:?}", other),
+        },
+        other => panic!("Expected optional type, got: {:?}", other),
+    }
+}
+
+#[test]
+fn parse_interface_with_any_type() {
+    let input = r#"
+interface org.example.anytest
+
+type Config (
+    name: string,
+    metadata: any,
+    extra: ?any
+)
+
+method SetConfig(config: Config, data: any) -> (result: any)
+method GetData() -> (items: []any, map: [string]any)
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    assert_eq!(interface.name(), "org.example.anytest");
+    assert_eq!(interface.custom_types().count(), 1);
+    assert_eq!(interface.methods().count(), 2);
+
+    // Check custom type fields
+    let custom_types: Vec<_> = interface.custom_types().collect();
+    let config = custom_types[0].as_object().unwrap();
+    let fields: Vec<_> = config.fields().collect();
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0].name(), "name");
+    assert_eq!(fields[0].ty(), &Type::String);
+    assert_eq!(fields[1].name(), "metadata");
+    assert_eq!(fields[1].ty(), &Type::Any);
+    assert_eq!(fields[2].name(), "extra");
+    assert_eq!(fields[2].ty(), &Type::Optional(TypeRef::new(&Type::Any)));
+
+    // Check SetConfig method
+    let methods: Vec<_> = interface.methods().collect();
+    let set_config = methods[0];
+    assert_eq!(set_config.name(), "SetConfig");
+    let inputs: Vec<_> = set_config.inputs().collect();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[1].name(), "data");
+    assert_eq!(inputs[1].ty(), &Type::Any);
+    let outputs: Vec<_> = set_config.outputs().collect();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].name(), "result");
+    assert_eq!(outputs[0].ty(), &Type::Any);
+
+    // Check GetData method
+    let get_data = methods[1];
+    assert_eq!(get_data.name(), "GetData");
+    let outputs: Vec<_> = get_data.outputs().collect();
+    assert_eq!(outputs.len(), 2);
+    assert_eq!(outputs[0].name(), "items");
+    assert_eq!(outputs[0].ty(), &Type::Array(TypeRef::new(&Type::Any)));
+    assert_eq!(outputs[1].name(), "map");
+    assert_eq!(outputs[1].ty(), &Type::Map(TypeRef::new(&Type::Any)));
 }
 
 /// Parse a Varlink type from a string.

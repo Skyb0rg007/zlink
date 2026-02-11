@@ -272,3 +272,40 @@ fn test_camelcase_rename_attributes() {
     assert!(code.contains(r#"#[zlink(rename = "userId")]"#));
     assert!(code.contains("user_id: i64"));
 }
+
+#[test]
+fn test_interface_with_any_type() {
+    let idl = r#"
+interface org.example.anytype
+
+type Config (
+    name: string,
+    metadata: any,
+    extra: ?any,
+    items: []any,
+    tags: [string]any
+)
+
+method SetConfig(data: any) -> (result: any)
+method GetData() -> (items: []any, map: [string]any)
+"#;
+
+    let interface = Interface::try_from(idl).unwrap();
+    let code = generate_interface(&interface).unwrap();
+
+    // Check struct fields use serde_json::Value for any type.
+    assert!(code.contains("pub metadata: serde_json::Value"));
+    assert!(code.contains("pub extra: Option<serde_json::Value>"));
+    assert!(code.contains("pub items: Vec<serde_json::Value>"));
+    assert!(code.contains("pub tags: std::collections::HashMap<String, serde_json::Value>"));
+
+    // Check method input parameters use references.
+    assert!(code.contains("data: &serde_json::Value"));
+
+    // Check single output returns serde_json::Value.
+    assert!(code.contains("serde_json::Value"));
+
+    // Check GetData output struct contains array and map of any.
+    assert!(code.contains("Vec<serde_json::Value>"));
+    assert!(code.contains("std::collections::HashMap<"));
+}

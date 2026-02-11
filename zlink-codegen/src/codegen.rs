@@ -516,6 +516,7 @@ fn type_to_rust(ty: &Type) -> Result<String> {
             format!("Option<{}>", inner_rust)
         }
         Type::Custom(name) => name.to_pascal_case(),
+        Type::Any => "serde_json::Value".to_string(),
     })
 }
 
@@ -550,6 +551,7 @@ fn type_to_rust_param(ty: &Type) -> Result<String> {
             format!("Option<{}>", inner_rust)
         }
         Type::Custom(name) => format!("&{}", name.to_pascal_case()),
+        Type::Any => "&serde_json::Value".to_string(),
     })
 }
 
@@ -572,6 +574,7 @@ fn type_to_rust_param_elem(ty: &Type) -> Result<String> {
             format!("std::collections::HashMap<&str, {}>", value_rust)
         }
         Type::ForeignObject => "serde_json::Value".to_string(),
+        Type::Any => "serde_json::Value".to_string(),
         Type::Optional(inner_type) => {
             let inner_rust = type_to_rust_param_elem(inner_type.inner())?;
             format!("Option<{}>", inner_rust)
@@ -613,6 +616,7 @@ fn type_to_rust_output(ty: &Type) -> Result<String> {
             format!("std::collections::HashMap<&'a str, {}>", value_rust)
         }
         Type::ForeignObject => "serde_json::Value".to_string(),
+        Type::Any => "serde_json::Value".to_string(),
         Type::Optional(inner_type) => {
             // For optional outputs, recursively apply type_to_rust_output to maintain
             // correct reference types for strings within collections
