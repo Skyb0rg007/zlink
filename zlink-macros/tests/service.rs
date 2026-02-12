@@ -5,6 +5,8 @@
 
 #[path = "service/basic.rs"]
 mod basic;
+#[path = "service/borrowed-types.rs"]
+mod borrowed_types;
 #[path = "service/custom_bounds.rs"]
 mod custom_bounds;
 #[path = "service/fd_passing.rs"]
