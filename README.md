@@ -63,10 +63,10 @@ use zlink::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a channel to signal when server is ready
+    // Create a channel to signal when server is ready.
     let (ready_tx, ready_rx) = oneshot::channel();
 
-    // Run server and client concurrently
+    // Run server and client concurrently.
     select! {
         res = run_server(ready_tx) => res?,
         res = run_client(ready_rx) => res?,
@@ -76,26 +76,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_client(ready_rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    // Wait for server to be ready
+    // Wait for server to be ready.
     ready_rx.await.map_err(|_| "Server failed to start")?;
 
-    // Connect to the calculator service
+    // Connect to the calculator service.
     let mut conn = unix::connect(SOCKET_PATH).await?;
 
-    // Use the proxy-generated methods
+    // Use the proxy-generated methods.
     let result = conn.add(5.0, 3.0).await?.unwrap();
     assert_eq!(result.result, 8.0);
 
     let result = conn.multiply(4.0, 7.0).await?.unwrap();
     assert_eq!(result.result, 28.0);
 
-    // Handle errors properly
+    // Handle errors properly.
     let Err(CalculatorError::DivisionByZero { message }) = conn.divide(10.0, 0.0).await? else {
         panic!("Expected DivisionByZero error");
     };
     assert_eq!(message, "Cannot divide by zero");
 
-    // Test invalid input error with large dividend
+    // Test invalid input error with large dividend.
     let Err(CalculatorError::InvalidInput {
         field,
         reason,
@@ -134,7 +134,7 @@ trait CalculatorProxy {
     ) -> zlink::Result<Result<Statistics<'_>, CalculatorError<'_>>>;
 }
 
-// Types shared between client and server
+// Types shared between client and server.
 #[derive(Debug, Serialize, Deserialize)]
 struct CalculationResult {
     result: f64,
@@ -162,18 +162,18 @@ enum CalculatorError<'a> {
 async fn run_server(ready_tx: oneshot::Sender<()>) -> Result<(), Box<dyn std::error::Error>> {
     let _ = remove_file(SOCKET_PATH).await;
 
-    // Setup the server
+    // Setup and run the server.
     let listener = unix::bind(SOCKET_PATH)?;
     let service = Calculator::new();
     let server = Server::new(listener, service);
 
-    // Signal that server is ready
+    // Signal that server is ready.
     let _ = ready_tx.send(());
 
     server.run().await.map_err(|e| e.into())
 }
 
-// The calculator service
+// The calculator service.
 struct Calculator {
     operations: Vec<String>,
 }
