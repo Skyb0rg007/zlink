@@ -44,22 +44,13 @@ The zlink project consists of several subcrates:
 
 ### Example: Calculator Service and Client
 
-> **Note**: For service implementation, zlink currently only provides a low-level API. A high-level
-> service API with attribute macros (similar to the `proxy` macro for clients) is planned for the
-> near future.
-
-Here's a complete example showing both service implementation and client usage through the `proxy`
-macro:
+Here's a complete example showing both service and client implementations using zlink's attribute
+macros:
 
 ```rust
 use serde::{Deserialize, Serialize};
 use tokio::{select, sync::oneshot, fs::remove_file};
-use zlink::{
-    proxy,
-    service::{self, MethodReply, Service},
-    connection::{Connection, Socket},
-    unix, Call, ReplyError, Server,
-};
+use zlink::{introspect, proxy, service, unix, ReplyError, Server};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -96,22 +87,21 @@ async fn run_client(ready_rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::
     assert_eq!(message, "Cannot divide by zero");
 
     // Test invalid input error with large dividend.
-    let Err(CalculatorError::InvalidInput {
-        field,
-        reason,
-    }) = conn.divide(2000000.0, 2.0).await? else {
+    let Err(CalculatorError::InvalidInput { field, reason }) =
+        conn.divide(2000000.0, 2.0).await?
+    else {
         panic!("Expected InvalidInput error");
     };
-    println!("Field: {}, Reason: {}", field, reason);
+    println!("Field: {field}, Reason: {reason}");
 
     let stats = conn.get_stats().await?.unwrap();
     assert_eq!(stats.count, 2);
-    println!("Stats: {:?}", stats);
+    println!("Stats: {stats:?}");
 
     Ok(())
 }
 
-// The client proxy - this implements the trait for `Connection<S>`
+// The client proxy.
 #[proxy("org.example.Calculator")]
 trait CalculatorProxy {
     async fn add(
@@ -147,11 +137,11 @@ struct Statistics<'a> {
     operations: Vec<&'a str>,
 }
 
-#[derive(Debug, ReplyError)]
+#[derive(Debug, PartialEq, ReplyError, introspect::ReplyError)]
 #[zlink(interface = "org.example.Calculator")]
 enum CalculatorError<'a> {
     DivisionByZero {
-        message: &'a str
+        message: &'a str,
     },
     InvalidInput {
         field: &'a str,
@@ -164,8 +154,7 @@ async fn run_server(ready_tx: oneshot::Sender<()>) -> Result<(), Box<dyn std::er
 
     // Setup and run the server.
     let listener = unix::bind(SOCKET_PATH)?;
-    let service = Calculator::new();
-    let server = Server::new(listener, service);
+    let server = Server::new(listener, Calculator::new());
 
     // Signal that server is ready.
     let _ = ready_tx.send(());
@@ -180,105 +169,52 @@ struct Calculator {
 
 impl Calculator {
     fn new() -> Self {
-        Self {
-            operations: Vec::new(),
+        Self { operations: Vec::new() }
+    }
+}
+
+#[service(interface = "org.example.Calculator")]
+impl Calculator {
+    async fn add(&mut self, a: f64, b: f64) -> CalculationResult {
+        self.operations.push(format!("add({a}, {b})"));
+        CalculationResult { result: a + b }
+    }
+
+    async fn multiply(&mut self, x: f64, y: f64) -> CalculationResult {
+        self.operations.push(format!("multiply({x}, {y})"));
+        CalculationResult { result: x * y }
+    }
+
+    async fn divide(
+        &mut self,
+        dividend: f64,
+        divisor: f64,
+    ) -> Result<CalculationResult, CalculatorError<'_>> {
+        if divisor == 0.0 {
+            Err(CalculatorError::DivisionByZero {
+                message: "Cannot divide by zero",
+            })
+        } else if dividend < -1000000.0 || dividend > 1000000.0 {
+            Err(CalculatorError::InvalidInput {
+                field: "dividend",
+                reason: "must be within range",
+            })
+        } else {
+            self.operations
+                .push(format!("divide({dividend}, {divisor})"));
+            Ok(CalculationResult {
+                result: dividend / divisor,
+            })
         }
     }
-}
 
-// Implement the Service trait
-impl<Sock> Service<Sock> for Calculator
-where
-    Sock: Socket,
-{
-    type MethodCall<'de> = CalculatorMethod;
-    type ReplyParams<'ser> = CalculatorReply<'ser>
-    where
-        Self: 'ser;
-    type ReplyStreamParams = ();
-    type ReplyStream = futures_util::stream::Empty<zlink::service::ReplyStreamItem<()>>;
-    type ReplyError<'ser> = CalculatorError<'ser>
-    where
-        Self: 'ser;
-
-    async fn handle<'service>(
-        &'service mut self,
-        call: &'service Call<Self::MethodCall<'_>>,
-        conn: &mut Connection<Sock>,
-        fds: Vec<std::os::fd::OwnedFd>,
-    ) -> service::HandleResult<
-        Self::ReplyParams<'service>,
-        Self::ReplyStream,
-        Self::ReplyError<'service>,
-    > {
-        let _ = (conn, fds);
-        let reply = match call.method() {
-            CalculatorMethod::Add { a, b } => {
-                self.operations.push(format!("add({}, {})", a, b));
-                MethodReply::Single(Some(CalculatorReply::Result(
-                    CalculationResult { result: a + b },
-                )))
-            }
-            CalculatorMethod::Multiply { x, y } => {
-                self.operations.push(format!("multiply({}, {})", x, y));
-                MethodReply::Single(Some(CalculatorReply::Result(
-                    CalculationResult { result: x * y },
-                )))
-            }
-            CalculatorMethod::Divide { dividend, divisor } => {
-                if *divisor == 0.0 {
-                    MethodReply::Error(CalculatorError::DivisionByZero {
-                        message: "Cannot divide by zero",
-                    })
-                } else if dividend < &-1000000.0 || dividend > &1000000.0 {
-                    MethodReply::Error(CalculatorError::InvalidInput {
-                        field: "dividend",
-                        reason: "must be within range",
-                    })
-                } else {
-                    self.operations
-                        .push(format!("divide({}, {})", dividend, divisor));
-                    MethodReply::Single(Some(CalculatorReply::Result(
-                        CalculationResult {
-                            result: dividend / divisor,
-                        },
-                    )))
-                }
-            }
-            CalculatorMethod::GetStats => {
-                let ops: Vec<&str> =
-                    self.operations.iter().map(|s| s.as_str()).collect();
-                MethodReply::Single(Some(CalculatorReply::Stats(Statistics {
-                    count: self.operations.len() as u64,
-                    operations: ops,
-                })))
-            }
-        };
-        (reply, Vec::new())
+    async fn get_stats(&self) -> Statistics<'_> {
+        let ops: Vec<&str> = self.operations.iter().map(|s| s.as_str()).collect();
+        Statistics {
+            count: self.operations.len() as u64,
+            operations: ops,
+        }
     }
-}
-
-// Method calls the service handles
-#[derive(Debug, Deserialize)]
-#[serde(tag = "method", content = "parameters")]
-enum CalculatorMethod {
-    #[serde(rename = "org.example.Calculator.Add")]
-    Add { a: f64, b: f64 },
-    #[serde(rename = "org.example.Calculator.Multiply")]
-    Multiply { x: f64, y: f64 },
-    #[serde(rename = "org.example.Calculator.Divide")]
-    Divide { dividend: f64, divisor: f64 },
-    #[serde(rename = "org.example.Calculator.GetStats")]
-    GetStats,
-}
-
-// Reply types
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum CalculatorReply<'a> {
-    Result(CalculationResult),
-    #[serde(borrow)]
-    Stats(Statistics<'a>),
 }
 
 const SOCKET_PATH: &str = "/tmp/calculator_example.varlink";
