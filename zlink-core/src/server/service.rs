@@ -21,6 +21,14 @@ pub type ReplyStreamItem<Params> = (Reply<Params>, Vec<std::os::fd::OwnedFd>);
 pub type ReplyStreamItem<Params> = Reply<Params>;
 
 /// Service trait for handling method calls.
+///
+/// Instead of implementing this trait manually, prefer using the [`service`] attribute macro which
+/// generates the implementation for you. The macro provides a more ergonomic API and handles the
+/// boilerplate of method dispatching, error handling, and streaming replies.
+///
+/// See the [`service`] macro documentation for details and examples.
+///
+/// [`service`]: macro@crate::service
 pub trait Service<Sock>
 where
     Sock: Socket,
