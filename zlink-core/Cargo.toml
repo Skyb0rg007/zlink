@@ -13,7 +13,7 @@ default = ["std", "server", "proxy", "tracing"]
 std = ["dep:rustix", "dep:libc", "zlink-macros/std"]
 server = []
 proxy = ["zlink-macros/proxy"]
-service = ["server", "zlink-macros/service"]
+service = ["server", "zlink-macros/service", "introspection"]
 # IDL and introspection support
 idl = []
 idl-parse = ["idl", "dep:winnow", "zlink-macros/idl-parse"]
