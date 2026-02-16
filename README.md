@@ -390,6 +390,7 @@ cargo run \
 - `tokio` (default): Enable tokio runtime integration.
 - `smol`: Enable smol runtime integration.
 - `server` (default): Enable server-related functionality (Server, Listener, Service).
+- `service` (default): Enable the `#[service]` macro. Implies `server` and `introspection`.
 - `proxy` (default): Enable the `#[proxy]` macro for type-safe client code.
 - `tracing` (default): Enable `tracing`-based logging.
 - `defmt`:  Enable `defmt`-based logging. If both `tracing` and `defmt` is enabled, `tracing` is
