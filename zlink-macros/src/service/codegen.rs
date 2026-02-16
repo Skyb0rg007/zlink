@@ -7,6 +7,7 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{Error, GenericParam, ItemImpl, Type};
 
 use super::{attrs::ServiceAttrs, method::MethodInfo};
+use crate::utils::convert_type_lifetimes;
 
 /// Context for generating the `handle` method body.
 struct HandleBodyContext<'a> {
@@ -280,7 +281,7 @@ fn generate_method_call_enum(
                     .iter()
                     .map(|param| {
                         let name = &param.name;
-                        let ty = &param.ty;
+                        let converted_ty = convert_type_lifetimes(&param.ty, "'__de");
 
                         let serde_attr = if let Some(ref renamed) = param.serialized_name {
                             quote! { #[serde(rename = #renamed)] }
@@ -290,7 +291,7 @@ fn generate_method_call_enum(
 
                         quote! {
                             #serde_attr
-                            #name: #ty
+                            #name: #converted_ty
                         }
                     })
                     .collect();
@@ -452,13 +453,14 @@ fn generate_reply_error_enum(
             };
             if &error_type.to_token_stream().to_string() == type_str {
                 let variant_name = format_ident!("__{}Variant{}", enum_name, idx);
+                let converted = convert_type_lifetimes(error_type, "'__ser");
                 variants.push(quote! {
-                    #variant_name(#error_type)
+                    #variant_name(#converted)
                 });
 
                 from_impls.push(quote! {
-                    impl ::core::convert::From<#error_type> for #enum_name<'_> {
-                        fn from(e: #error_type) -> Self {
+                    impl<'__ser> ::core::convert::From<#converted> for #enum_name<'__ser> {
+                        fn from(e: #converted) -> Self {
                             #enum_name::#variant_name(e)
                         }
                     }
@@ -702,8 +704,9 @@ fn generate_reply_params_enum(
             };
             if &return_type.to_token_stream().to_string() == type_str {
                 let variant_name = format_ident!("__{}Variant{}", method_call_name, idx);
+                let converted = convert_type_lifetimes(return_type, "'__ser");
                 variants.push(quote! {
-                    #variant_name(#return_type)
+                    #variant_name(#converted)
                 });
                 break;
             }

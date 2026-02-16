@@ -1,4 +1,46 @@
 //! Contains connection related API.
+//!
+//! The [`Connection`] type provides a low-level API for sending and receiving Varlink messages.
+//! For most use cases, you'll want to use the higher-level [`proxy`] and [`service`] attribute
+//! macros instead, which generate type-safe client and server code respectively.
+//!
+//! # Client Usage with `proxy` Macro
+//!
+//! The [`proxy`] macro generates methods on `Connection<S>` for calling remote service methods:
+//!
+//! ```
+//! #[zlink_core::proxy(
+//!     interface = "org.example.Calculator",
+//!     // Not needed in the real code because you'll use `proxy` through `zlink` crate.
+//!     crate = "zlink_core",
+//! )]
+//! trait CalculatorProxy {
+//!     async fn add(&mut self, a: f64, b: f64) -> zlink_core::Result<Result<f64, CalcError>>;
+//! }
+//!
+//! #[derive(Debug, zlink_core::ReplyError)]
+//! #[zlink(
+//!     interface = "org.example.Calculator",
+//!     // Not needed in the real code because you'll use `ReplyError` through `zlink` crate.
+//!     crate = "zlink_core",
+//! )]
+//! enum CalcError {}
+//! ```
+//!
+//! # Server Usage with `service` Macro
+//!
+//! The [`service`] macro generates the [`Service`] trait implementation. See the [`service`] macro
+//! documentation for details and examples.
+//!
+//! # Low-Level API
+//!
+//! For advanced use cases that require more control, the [`Connection`] type provides direct access
+//! to message sending and receiving via methods like [`Connection::send_call`],
+//! [`Connection::receive_reply`], and [`Connection::chain_call`] for pipelining.
+//!
+//! [`proxy`]: macro@crate::proxy
+//! [`service`]: macro@crate::service
+//! [`Service`]: crate::service::Service
 
 #[cfg(feature = "std")]
 mod credentials;
