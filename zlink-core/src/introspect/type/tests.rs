@@ -42,6 +42,7 @@ fn complex_type() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn map_types() {
     use std::collections::{BTreeMap, HashMap};
@@ -58,6 +59,7 @@ fn map_types() {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn set_types() {
     use std::collections::{BTreeSet, HashSet};
@@ -122,6 +124,7 @@ fn core_time_types() {
     assert_eq!(*<core::time::Duration>::TYPE, idl::Type::Float);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn std_time_types() {
     use std::time::{Instant, SystemTime};
@@ -130,6 +133,7 @@ fn std_time_types() {
     assert_eq!(*<SystemTime>::TYPE, idl::Type::Float);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn path_types() {
     use std::path::{Path, PathBuf};
@@ -138,6 +142,7 @@ fn path_types() {
     assert_eq!(*<Path>::TYPE, idl::Type::String);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn osstring_types() {
     use std::ffi::{OsStr, OsString};
