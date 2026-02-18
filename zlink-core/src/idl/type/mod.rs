@@ -20,6 +20,8 @@ pub enum Type<'a> {
     String,
     /// Foreign untyped object.
     ForeignObject,
+    /// Any JSON value (systemd extension).
+    Any,
     /// Optional/nullable type.
     Optional(TypeRef<'a>),
     /// Array type.
@@ -92,6 +94,7 @@ impl<'a> fmt::Display for Type<'a> {
             Type::Float => write!(f, "float"),
             Type::String => write!(f, "string"),
             Type::ForeignObject => write!(f, "object"),
+            Type::Any => write!(f, "any"),
             Type::Optional(optional) => write!(f, "?{optional}"),
             Type::Array(array) => write!(f, "[]{array}"),
             Type::Map(map) => write!(f, "[string]{map}"),
@@ -179,6 +182,10 @@ mod tests {
         buf.clear();
         write!(buf, "{}", Type::ForeignObject).unwrap();
         assert_eq!(buf, "object");
+
+        buf.clear();
+        write!(buf, "{}", Type::Any).unwrap();
+        assert_eq!(buf, "any");
     }
 
     #[test]

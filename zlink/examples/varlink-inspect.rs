@@ -236,6 +236,7 @@ fn format_type(ty: &zlink::idl::Type<'_>) -> ColoredString {
         zlink::idl::Type::Float => "float".bright_blue(),
         zlink::idl::Type::String => "string".bright_blue(),
         zlink::idl::Type::ForeignObject => "object".bright_blue(),
+        zlink::idl::Type::Any => "any".bright_blue(),
         zlink::idl::Type::Array(type_ref) => format!("[{}]", format_type(type_ref)).bright_blue(),
         zlink::idl::Type::Optional(type_ref) => format!("?{}", format_type(type_ref)).bright_blue(),
         zlink::idl::Type::Map(type_ref) => {
