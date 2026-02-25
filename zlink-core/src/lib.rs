@@ -30,7 +30,7 @@ pub use error::{Error, Result};
 mod server;
 #[cfg(feature = "server")]
 pub use server::{
-    listener::Listener,
+    listener::{Listener, ReadyListener},
     service::{self, Service},
     Server,
 };
