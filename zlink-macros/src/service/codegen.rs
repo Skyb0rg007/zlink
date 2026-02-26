@@ -176,7 +176,7 @@ pub(super) fn generate_service_impl(
             (
                 quote! {
                     ::std::boxed::Box<
-                        dyn ::futures_util::Stream<
+                        dyn #crate_path::futures_util::Stream<
                                 Item = #crate_path::service::ReplyStreamItem<#reply_stream_params_name>
                             > + ::core::marker::Unpin
                     >
@@ -202,7 +202,7 @@ pub(super) fn generate_service_impl(
     } else {
         // No streaming methods - use empty stream.
         (
-            quote! { ::futures_util::stream::Empty<#crate_path::service::ReplyStreamItem<()>> },
+            quote! { #crate_path::futures_util::stream::Empty<#crate_path::service::ReplyStreamItem<()>> },
             quote! { () },
             quote! {},
         )
@@ -666,7 +666,7 @@ fn generate_reply_stream_enum(
             }
         }
 
-        impl ::futures_util::Stream for #enum_name {
+        impl #crate_path::futures_util::Stream for #enum_name {
             type Item = #crate_path::service::ReplyStreamItem<#reply_stream_params_name>;
 
             fn poll_next(
@@ -1077,7 +1077,7 @@ fn generate_handle_body(
                     // Method's stream yields (Reply<T>, Vec<OwnedFd>).
                     quote! {
                         let __stream = #method_call;
-                        let __mapped = ::futures_util::StreamExt::map(
+                        let __mapped = #crate_path::futures_util::StreamExt::map(
                             __stream,
                             |(__reply, __fds)| {
                                 let __mapped_reply = __reply.map(|__params| {
@@ -1087,7 +1087,7 @@ fn generate_handle_body(
                             },
                         );
                         let __boxed: ::std::boxed::Box<
-                            dyn ::futures_util::Stream<
+                            dyn #crate_path::futures_util::Stream<
                                     Item = #crate_path::service::ReplyStreamItem<
                                         #reply_stream_params_name
                                     >
@@ -1099,14 +1099,14 @@ fn generate_handle_body(
                     // Method's stream yields Reply<T>, wrap with empty FDs.
                     quote! {
                         let __stream = #method_call;
-                        let __mapped = ::futures_util::StreamExt::map(__stream, |__reply| {
+                        let __mapped = #crate_path::futures_util::StreamExt::map(__stream, |__reply| {
                             let __mapped_reply = __reply.map(|__params| {
                                 #reply_stream_params_name::#stream_variant_name(__params)
                             });
                             (__mapped_reply, ::std::vec::Vec::new())
                         });
                         let __boxed: ::std::boxed::Box<
-                            dyn ::futures_util::Stream<
+                            dyn #crate_path::futures_util::Stream<
                                     Item = #crate_path::service::ReplyStreamItem<
                                         #reply_stream_params_name
                                     >
@@ -1118,13 +1118,13 @@ fn generate_handle_body(
                 #[cfg(not(feature = "std"))]
                 let boxed_stream = quote! {
                     let __stream = #method_call;
-                    let __mapped = ::futures_util::StreamExt::map(__stream, |__reply| {
+                    let __mapped = #crate_path::futures_util::StreamExt::map(__stream, |__reply| {
                         __reply.map(|__params| {
                             #reply_stream_params_name::#stream_variant_name(__params)
                         })
                     });
                     let __boxed: ::std::boxed::Box<
-                        dyn ::futures_util::Stream<
+                        dyn #crate_path::futures_util::Stream<
                                 Item = #crate_path::service::ReplyStreamItem<
                                     #reply_stream_params_name
                                 >

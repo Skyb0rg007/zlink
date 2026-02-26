@@ -53,6 +53,10 @@ pub use zlink_macros::proxy;
 #[cfg(feature = "service")]
 pub use zlink_macros::service;
 
+/// Re-export of futures-util for use in generated code.
+#[doc(hidden)]
+pub use futures_util;
+
 /// Re-export of pin-project-lite for use in generated service code.
 #[cfg(feature = "service")]
 #[doc(hidden)]

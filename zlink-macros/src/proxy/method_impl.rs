@@ -461,7 +461,7 @@ fn generate_streaming_method(
     let return_type = if return_fds {
         quote! {
             #crate_path::Result<
-                impl ::futures_util::stream::Stream<
+                impl #crate_path::futures_util::stream::Stream<
                     Item = #crate_path::Result<(::core::result::Result<#reply_type, #error_type>, ::std::vec::Vec<::std::os::fd::OwnedFd>)>
                 >
             >
@@ -469,7 +469,7 @@ fn generate_streaming_method(
     } else {
         quote! {
             #crate_path::Result<
-                impl ::futures_util::stream::Stream<
+                impl #crate_path::futures_util::stream::Stream<
                     Item = #crate_path::Result<::core::result::Result<#reply_type, #error_type>>
                 >
             >
@@ -531,7 +531,7 @@ fn generate_streaming_method(
             1,
         );
 
-        use ::futures_util::stream::{Stream, StreamExt};
+        use #crate_path::futures_util::stream::{Stream, StreamExt};
         Ok(#map_stream)
     };
     (return_type, implementation)
