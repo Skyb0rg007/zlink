@@ -9,6 +9,8 @@ mod basic;
 mod borrowed_types;
 #[path = "service/custom_bounds.rs"]
 mod custom_bounds;
+#[path = "service/explicit-lifetimes.rs"]
+mod explicit_lifetimes;
 #[path = "service/fd_passing.rs"]
 mod fd_passing;
 #[path = "service/introspection.rs"]
