@@ -782,7 +782,7 @@ fn generate_interface_descriptions(
                         // uses `_name` for unused params, but Varlink IDL doesn't allow that).
                         let default_name = p.name.to_string().trim_start_matches('_').to_string();
                         let param_name = p.serialized_name.as_ref().unwrap_or(&default_name);
-                        let ty = &p.ty;
+                        let ty = convert_type_lifetimes(&p.ty, "'static");
                         quote! {
                             &#crate_path::idl::Parameter::new(
                                 #param_name,
@@ -849,6 +849,7 @@ fn generate_interface_descriptions(
                 seen_error_types.insert(type_str)
             })
             .map(|err_ty| {
+                let err_ty = convert_type_lifetimes(err_ty, "'static");
                 quote! {
                     <#err_ty as #crate_path::introspect::ReplyError>::VARIANTS
                 }
