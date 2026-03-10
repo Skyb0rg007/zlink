@@ -181,18 +181,25 @@ impl connection::socket::FetchPeerCredentials for MockReadHalf {
         // For mock sockets, return credentials of the current process.
         let uid = rustix::process::getuid();
         let pid = rustix::process::getpid();
+        let gid = rustix::process::getgid();
 
         #[cfg(target_os = "linux")]
         {
             use rustix::process::PidfdFlags;
 
             let process_fd = rustix::process::pidfd_open(pid, PidfdFlags::empty())?;
-            Ok(connection::Credentials::new(uid, pid, process_fd))
+            Ok(connection::Credentials::new(
+                uid,
+                gid,
+                vec![],
+                pid,
+                process_fd,
+            ))
         }
 
         #[cfg(not(target_os = "linux"))]
         {
-            Ok(connection::Credentials::new(uid, pid))
+            Ok(connection::Credentials::new(uid, gid, pid))
         }
     }
 }
