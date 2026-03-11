@@ -133,7 +133,7 @@ where
                                     Err(e) => warn!("Error writing to connection: {:?}", e),
                                 }
                             }
-                            Err(e) => warn!("Error reading from socket: {:?}", e),
+                            Err(e) => debug!("Error reading from socket: {:?}", e),
                         }
 
                         if stream.is_some() || remove {
