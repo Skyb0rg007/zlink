@@ -37,18 +37,32 @@ async fn peer_credentials_unix_socket() {
     // Save values for comparison.
     let uid1 = creds.unix_user_id();
     let pid1 = creds.process_id();
+    let gid1 = creds.unix_primary_group_id();
     #[cfg(target_os = "linux")]
     let pidfd1 = creds.process_fd().as_raw_fd();
+    #[cfg(target_os = "linux")]
+    let gids1 = creds.unix_supplementary_group_ids().to_owned();
 
     // Verify caching works - calling again should return the same values.
     let creds2 = connection.peer_credentials().await.unwrap();
     assert_eq!(uid1, creds2.unix_user_id(), "Cached UID should match");
     assert_eq!(pid1, creds2.process_id(), "Cached PID should match");
+    assert_eq!(
+        gid1,
+        creds2.unix_primary_group_id(),
+        "Cached GID should match"
+    );
     #[cfg(target_os = "linux")]
     assert_eq!(
         pidfd1,
         creds2.process_fd().as_raw_fd(),
         "Cached pidfd should match"
+    );
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        gids1,
+        creds2.unix_supplementary_group_ids(),
+        "Cached supplementary GIDs should match"
     );
 
     let _stream = connect_task.await.unwrap();

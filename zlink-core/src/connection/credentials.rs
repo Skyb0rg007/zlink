@@ -1,11 +1,14 @@
 //! Connection credentials.
 
-use super::{Pid, Uid};
+use super::{Gid, Pid, Uid};
 
 /// Credentials of a peer connection.
 #[derive(Debug)]
 pub struct Credentials {
     unix_user_id: Uid,
+    unix_primary_group_id: Gid,
+    #[cfg(target_os = "linux")]
+    unix_supplementary_group_ids: Vec<Gid>,
     process_id: Pid,
     #[cfg(target_os = "linux")]
     process_fd: std::os::fd::OwnedFd,
@@ -20,11 +23,16 @@ impl Credentials {
     /// * `process_fd` (Linux only) - A file descriptor pinning the process.
     pub(crate) fn new(
         unix_user_id: Uid,
+        unix_primary_group_id: Gid,
+        #[cfg(target_os = "linux")] unix_supplementary_group_ids: Vec<Gid>,
         process_id: Pid,
         #[cfg(target_os = "linux")] process_fd: std::os::fd::OwnedFd,
     ) -> Self {
         Self {
             unix_user_id,
+            unix_primary_group_id,
+            #[cfg(target_os = "linux")]
+            unix_supplementary_group_ids,
             process_id,
             #[cfg(target_os = "linux")]
             process_fd,
@@ -41,6 +49,19 @@ impl Credentials {
     /// On Unix, this is the process ID defined by POSIX.
     pub fn process_id(&self) -> Pid {
         self.process_id
+    }
+
+    /// The numeric Unix group ID, as defined by POSIX.
+    pub fn unix_primary_group_id(&self) -> Gid {
+        self.unix_primary_group_id
+    }
+
+    /// The set of numeric supplementary Unix group IDs, as defined by POSIX.
+    ///
+    /// Currently, this method is only available for Linux targets.
+    #[cfg(target_os = "linux")]
+    pub fn unix_supplementary_group_ids(&self) -> &[Gid] {
+        &self.unix_supplementary_group_ids
     }
 
     /// A file descriptor pinning the process, on platforms that have this concept.

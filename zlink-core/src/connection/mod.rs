@@ -49,7 +49,7 @@ mod read_connection;
 pub use credentials::Credentials;
 pub use read_connection::ReadConnection;
 #[cfg(feature = "std")]
-pub use rustix::{process::Pid, process::Uid};
+pub use rustix::{process::Gid, process::Pid, process::Uid};
 pub mod chain;
 pub mod socket;
 #[cfg(test)]

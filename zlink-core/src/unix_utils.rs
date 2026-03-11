@@ -83,6 +83,47 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         let ucred = rustix::net::sockopt::socket_peercred(fd)?;
         let uid = ucred.uid;
         let pid = ucred.pid;
+        let primary_gid = ucred.gid;
+
+        // Get SO_PEERGROUPS if available (Linux-only).
+        #[cfg(target_os = "linux")]
+        let supplementary_gids = {
+            use rustix::fs::Gid;
+
+            let mut nr_supp_gids = INITIAL_NUMBER_SUPPLEMENTARY_GROUPS;
+            let mut supp_gids: Vec<Gid> = Vec::with_capacity(nr_supp_gids as usize);
+
+            loop {
+                let ret = unsafe {
+                    libc::getsockopt(
+                        fd.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_PEERGROUPS,
+                        supp_gids.as_mut_ptr().cast(),
+                        &mut nr_supp_gids,
+                    )
+                };
+                let err = io::Error::last_os_error();
+
+                // We encountered an error which is not about the size of our passed container.
+                if ret == -1 && err.raw_os_error() != Some(libc::ERANGE) {
+                    return Err(err);
+                }
+
+                // If the number of groups returned is less than the requested size, we are done.
+                if nr_supp_gids as usize <= supp_gids.capacity() {
+                    supp_gids.shrink_to(nr_supp_gids as usize);
+                    break;
+                }
+
+                // Otherwise, the vector is too small. Resize and try again.
+                // We let the standard Vector speculation over-allocation take place here on
+                // purpose.
+                supp_gids.reserve(nr_supp_gids as usize - supp_gids.capacity());
+            }
+
+            supp_gids
+        };
 
         // Get SO_PEERPIDFD if available (Linux-only).
         #[cfg(target_os = "linux")]
@@ -120,9 +161,9 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         };
 
         #[cfg(target_os = "android")]
-        let creds = Credentials::new(uid, pid);
+        let creds = Credentials::new(uid, primary_gid, pid);
         #[cfg(target_os = "linux")]
-        let creds = Credentials::new(uid, pid, process_fd);
+        let creds = Credentials::new(uid, primary_gid, supplementary_gids, pid, process_fd);
 
         Ok(creds)
     }
@@ -147,6 +188,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         }
 
         let uid = rustix::process::Uid::from_raw(uid);
+        let gid = rustix::process::Gid::from_raw(gid);
 
         // Platform-specific PID fetching.
         #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -242,7 +284,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         #[cfg(any(target_os = "freebsd", target_os = "dragonfly"))]
         let pid = rustix::process::Pid::from_raw(0).unwrap();
 
-        Ok(Credentials::new(uid, pid))
+        Ok(Credentials::new(uid, gid, pid))
     }
 
     #[cfg(not(any(
@@ -267,3 +309,9 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
 ///
 /// The value is based on what is used in `zbus`, which comes from sdbus.
 const MAX_FDS: usize = 1024;
+
+// Linux can go up to NGROUPS_MAX supplementary groups (65K). It is safe to assume that
+// most users will have a couple of supplementary groups by default. We allocate 128
+// because integers are tiny.
+#[cfg(target_os = "linux")]
+const INITIAL_NUMBER_SUPPLEMENTARY_GROUPS: libc::socklen_t = 128 as libc::socklen_t;

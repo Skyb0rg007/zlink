@@ -11,6 +11,7 @@ use zlink::connection::Credentials;
 pub fn verify_credentials(creds: &Credentials) -> Result<(), &'static str> {
     verify_uid(creds)?;
     verify_pid(creds)?;
+    verify_gid(creds)?;
     #[cfg(target_os = "linux")]
     verify_pidfd(creds)?;
     Ok(())
@@ -21,6 +22,15 @@ pub fn verify_uid(creds: &Credentials) -> Result<(), &'static str> {
     let expected_uid = rustix::process::getuid();
     if creds.unix_user_id() != expected_uid {
         return Err("UID does not match current process");
+    }
+    Ok(())
+}
+
+/// Verify GID matches current process.
+pub fn verify_gid(creds: &Credentials) -> Result<(), &'static str> {
+    let expected_gid = rustix::process::getgid();
+    if creds.unix_primary_group_id() != expected_gid {
+        return Err("GID does not match current process");
     }
     Ok(())
 }
