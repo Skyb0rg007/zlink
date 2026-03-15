@@ -1376,10 +1376,26 @@ fn generate_handle_body(
         interfaces.iter().map(|iface| quote! { #iface }).collect();
 
     // Service metadata.
-    let vendor = service_attrs.vendor.as_deref().unwrap_or("");
-    let product = service_attrs.product.as_deref().unwrap_or("");
-    let version = service_attrs.version.as_deref().unwrap_or("");
-    let url = service_attrs.url.as_deref().unwrap_or("");
+    let vendor = service_attrs
+        .vendor
+        .as_ref()
+        .map(|v| quote! { #v })
+        .unwrap_or_else(|| quote! { "" });
+    let product = service_attrs
+        .product
+        .as_ref()
+        .map(|v| quote! { #v })
+        .unwrap_or_else(|| quote! { "" });
+    let version = service_attrs
+        .version
+        .as_ref()
+        .map(|v| quote! { #v })
+        .unwrap_or_else(|| quote! { "" });
+    let url = service_attrs
+        .url
+        .as_ref()
+        .map(|v| quote! { #v })
+        .unwrap_or_else(|| quote! { "" });
 
     // Generate the varlink service methods match.
     let get_info_reply = wrap_handle_result_no_fds(quote! {
