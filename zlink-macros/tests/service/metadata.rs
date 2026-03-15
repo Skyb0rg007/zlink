@@ -30,8 +30,8 @@ async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
             let info = conn.get_info().await?.unwrap();
             assert_eq!(info.vendor, "Test Vendor");
             assert_eq!(info.product, "Test Product");
-            assert_eq!(info.version, "1.0.0");
-            assert_eq!(info.url, "https://example.com");
+            assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+            assert_eq!(info.url, env!("CARGO_PKG_REPOSITORY"));
             let interfaces: Vec<&str> = info.interfaces.iter().map(|s| s.as_ref()).collect();
             assert_eq!(
                 interfaces.as_slice(),
@@ -66,8 +66,8 @@ pub struct MetadataService;
     interface = "org.example.metadata",
     vendor = "Test Vendor",
     product = "Test Product",
-    version = "1.0.0",
-    url = "https://example.com"
+    version = env!("CARGO_PKG_VERSION"),
+    url = env!("CARGO_PKG_REPOSITORY")
 )]
 impl MetadataService {
     async fn ping(&self) {}

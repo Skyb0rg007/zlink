@@ -16,13 +16,13 @@ pub(super) struct ServiceAttrs {
     /// Default interface name for all methods.
     pub interface: Option<String>,
     /// Service vendor name.
-    pub vendor: Option<String>,
+    pub vendor: Option<syn::Expr>,
     /// Service product name.
-    pub product: Option<String>,
+    pub product: Option<syn::Expr>,
     /// Service version.
-    pub version: Option<String>,
+    pub version: Option<syn::Expr>,
     /// Service URL.
-    pub url: Option<String>,
+    pub url: Option<syn::Expr>,
 }
 
 impl ServiceAttrs {
@@ -53,17 +53,17 @@ impl ServiceAttrs {
                     let value: syn::LitStr = meta.value()?.parse()?;
                     interface = Some(value.value());
                 } else if meta.path.is_ident("vendor") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    vendor = Some(value.value());
+                    let value: syn::Expr = meta.value()?.parse()?;
+                    vendor = Some(value);
                 } else if meta.path.is_ident("product") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    product = Some(value.value());
+                    let value: syn::Expr = meta.value()?.parse()?;
+                    product = Some(value);
                 } else if meta.path.is_ident("version") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    version = Some(value.value());
+                    let value: syn::Expr = meta.value()?.parse()?;
+                    version = Some(value);
                 } else if meta.path.is_ident("url") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    url = Some(value.value());
+                    let value: syn::Expr = meta.value()?.parse()?;
+                    url = Some(value);
                 } else {
                     return Err(meta.error("unsupported service attribute"));
                 }
@@ -76,8 +76,9 @@ impl ServiceAttrs {
                     format!(
                         "failed to parse service attributes: {e}. Expected: \
                          #[service], #[service(crate = \"path\")], \
-                         #[service(interface = \"...\", types = [T1, T2], vendor = \"...\", \
-                         product = \"...\", version = \"...\", url = \"...\")]"
+                         #[service(interface = \"...\", types = [T1, T2], \
+                         vendor = <expr>, product = <expr>, version = <expr>, \
+                         url = <expr>)]"
                     ),
                 )
             })?;

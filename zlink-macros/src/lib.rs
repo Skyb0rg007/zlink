@@ -1019,10 +1019,11 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// * `types = [Type1, Type2, ...]` - Custom types to include in interface descriptions. These types
 ///   must implement `CustomType` (typically via `#[derive(CustomType)]`). The types are included in
 ///   the IDL for any interface that uses them.
-/// * `vendor = "..."` - The vendor name for `GetInfo` response. Defaults to empty string.
-/// * `product = "..."` - The product name for `GetInfo` response. Defaults to empty string.
-/// * `version = "..."` - The version string for `GetInfo` response. Defaults to empty string.
-/// * `url = "..."` - The URL for `GetInfo` response. Defaults to empty string.
+/// * `vendor = <expr>` - The vendor name for `GetInfo` response. Defaults to empty string.
+/// * `product = <expr>` - The product name for `GetInfo` response. Defaults to empty string.
+/// * `version = <expr>` - The version string for `GetInfo` response. Defaults to empty string. E.g.
+///   `version = env!("CARGO_PKG_VERSION")`.
+/// * `url = <expr>` - The URL for `GetInfo` response. Defaults to empty string.
 ///
 /// ## On methods:
 ///
@@ -1293,7 +1294,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     types = [Balance],
 ///     vendor = "Example Corp",
 ///     product = "Bank Service",
-///     version = "1.0.0",
+///     version = env!("CARGO_PKG_VERSION"),
 ///     url = "https://example.com/bank"
 /// )]
 /// impl BankService {
@@ -1306,10 +1307,11 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// # use zlink::test_utils::mock_socket::MockSocket;
 /// // GetInfo returns metadata and list of interfaces.
-/// # let responses = [
-/// #     r#"{"parameters":{"vendor":"Example Corp","product":"Bank Service","version":"1.0.0","url":"https://example.com/bank","interfaces":["org.example.bank","org.varlink.service"]}}"#,
-/// # ];
-/// # let socket = MockSocket::with_responses(&responses);
+/// # let response = format!(
+/// #     r#"{{"parameters":{{"vendor":"Example Corp","product":"Bank Service","version":"{}","url":"https://example.com/bank","interfaces":["org.example.bank","org.varlink.service"]}}}}"#,
+/// #     env!("CARGO_PKG_VERSION"),
+/// # );
+/// # let socket = MockSocket::with_responses(&[&response]);
 /// # let mut conn = zlink::Connection::new(socket);
 /// let info = conn.get_info().await?.unwrap();
 /// assert_eq!(info.vendor, "Example Corp");
