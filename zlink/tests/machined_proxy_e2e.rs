@@ -9,13 +9,13 @@
 
 mod mock_machined_service;
 
-use futures_util::{pin_mut, Stream, TryStreamExt};
+use futures_util::{Stream, TryStreamExt, pin_mut};
 use std::path::Path;
 #[cfg(feature = "server")]
 use tempfile::TempDir;
 #[cfg(feature = "server")]
 use tokio::select;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use zlink::{
     proxy, unix,
     varlink_service::{self, Proxy},

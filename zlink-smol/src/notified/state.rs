@@ -6,7 +6,7 @@ use std::{
 
 use crate::Reply;
 use async_broadcast::{
-    broadcast, InactiveReceiver, Receiver as BroadcastReceiver, Sender as BroadcastSender,
+    InactiveReceiver, Receiver as BroadcastReceiver, Sender as BroadcastSender, broadcast,
 };
 use pin_project_lite::pin_project;
 

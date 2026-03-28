@@ -400,9 +400,10 @@ where
     {
         match self {
             Compound::Map { ser, state } => {
-                tri!(ser
-                    .formatter
-                    .begin_array_value(&mut ser.writer, *state == State::First));
+                tri!(
+                    ser.formatter
+                        .begin_array_value(&mut ser.writer, *state == State::First)
+                );
                 *state = State::Rest;
                 tri!(value.serialize(&mut **ser));
                 ser.formatter.end_array_value(&mut ser.writer)
@@ -507,9 +508,10 @@ where
     {
         match self {
             Compound::Map { ser, state } => {
-                tri!(ser
-                    .formatter
-                    .begin_object_key(&mut ser.writer, *state == State::First));
+                tri!(
+                    ser.formatter
+                        .begin_object_key(&mut ser.writer, *state == State::First)
+                );
                 *state = State::Rest;
 
                 tri!(key.serialize(MapKeySerializer { ser: *ser }));

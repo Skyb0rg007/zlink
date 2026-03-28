@@ -160,7 +160,7 @@ pub trait Proxy {
 #[cfg(test)]
 mod tests {
     use super::{super::OwnedReply, *};
-    use crate::{test_utils::mock_socket::MockSocket, Connection};
+    use crate::{Connection, test_utils::mock_socket::MockSocket};
     use futures_util::{pin_mut, stream::StreamExt};
 
     #[tokio::test]

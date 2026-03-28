@@ -5,7 +5,7 @@ async fn streaming_test() {
     use futures_util::stream::Stream;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     // Non-streaming methods can use borrowed types.
     // Streaming methods must use owned types (DeserializeOwned) because the internal buffer may be

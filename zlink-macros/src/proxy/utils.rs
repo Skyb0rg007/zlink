@@ -1,8 +1,8 @@
 use crate::utils::*;
 use std::collections::HashSet;
 use syn::{
-    punctuated::Punctuated, Attribute, Error, Expr, GenericArgument, Lit, Meta, PathArguments,
-    ReturnType, Type,
+    Attribute, Error, Expr, GenericArgument, Lit, Meta, PathArguments, ReturnType, Type,
+    punctuated::Punctuated,
 };
 
 /// Convert snake_case to PascalCase.
@@ -355,7 +355,7 @@ fn extract_inner_result_types(ty: &Type) -> Result<(Type, Type), Error> {
             return Err(Error::new_spanned(
                 ty,
                 "expected inner Result<ReplyType, ErrorType>",
-            ))
+            ));
         }
     };
 

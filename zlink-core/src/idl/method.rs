@@ -191,6 +191,9 @@ mod tests {
         let method = Method::new("GetUser", &inputs, &outputs, &comments);
         let mut displayed = String::new();
         write!(&mut displayed, "{}", method).unwrap();
-        assert_eq!(displayed, "# Get user information\n# Returns user details by ID\nmethod GetUser(id: int) -> (user: User)");
+        assert_eq!(
+            displayed,
+            "# Get user information\n# Returns user details by ID\nmethod GetUser(id: int) -> (user: User)"
+        );
     }
 }

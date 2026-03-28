@@ -3,12 +3,12 @@
 #![cfg(test)]
 
 use crate::{
+    Call, Result,
     connection::{
-        socket::{ReadHalf, Socket, WriteHalf},
         Connection,
+        socket::{ReadHalf, Socket, WriteHalf},
     },
     test_utils::mock_socket::{MockSocket, MockWriteHalf},
-    Call, Result,
 };
 use alloc::vec::Vec;
 use futures_util::{pin_mut, stream::StreamExt};

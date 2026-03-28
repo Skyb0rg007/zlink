@@ -1,14 +1,14 @@
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use futures_util::{pin_mut, StreamExt};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use futures_util::{StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
 use std::{hint::black_box, time::Duration};
 use tokio::{runtime::Runtime, time::sleep};
 use zlink_core::{
-    connection::{
-        socket::{ReadHalf, Socket, WriteHalf},
-        Connection,
-    },
     Call, Reply,
+    connection::{
+        Connection,
+        socket::{ReadHalf, Socket, WriteHalf},
+    },
 };
 
 criterion_group!(benches, client_sending, server_receiving);

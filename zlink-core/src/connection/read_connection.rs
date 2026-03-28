@@ -2,12 +2,12 @@
 
 use core::{fmt::Debug, str::from_utf8_unchecked};
 
-use crate::{varlink_service, Result};
+use crate::{Result, varlink_service};
 
 use super::{
+    BUFFER_SIZE, Call, MAX_BUFFER_SIZE,
     reply::{self, Reply},
     socket::ReadHalf,
-    Call, BUFFER_SIZE, MAX_BUFFER_SIZE,
 };
 #[cfg(feature = "std")]
 use alloc::collections::VecDeque;

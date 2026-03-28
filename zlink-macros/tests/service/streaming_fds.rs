@@ -3,8 +3,8 @@
 use super::fd_passing::{FdError, FdHandle};
 use serde::{Deserialize, Serialize};
 use zlink::{
-    unix::{bind, connect},
     Server,
+    unix::{bind, connect},
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

@@ -10,7 +10,7 @@ mod types;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, Error, ImplItem, ItemImpl};
+use syn::{Error, ImplItem, ItemImpl, parse2};
 
 use attrs::ServiceAttrs;
 use method::MethodInfo;

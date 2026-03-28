@@ -2,7 +2,7 @@
 async fn rename_test() {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[proxy("org.example.Rename")]
     trait RenameProxy {
@@ -65,7 +65,7 @@ async fn param_rename_chain_test() {
     use futures_util::{pin_mut, stream::StreamExt};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[derive(Debug, Serialize, Deserialize)]
     struct Error;

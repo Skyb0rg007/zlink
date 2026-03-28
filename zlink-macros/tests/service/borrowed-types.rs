@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 use zlink::{
+    Server,
     introspect::{self, CustomType},
     unix::{bind, connect},
-    Server,
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

@@ -2,7 +2,7 @@
 async fn optional_params_test() {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[proxy("org.example.Optional")]
     trait OptionalProxy {

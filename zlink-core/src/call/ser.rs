@@ -1,6 +1,6 @@
 use serde::{
-    ser::{Error, Impossible, SerializeMap, SerializeStruct},
     Serialize, Serializer,
+    ser::{Error, Impossible, SerializeMap, SerializeStruct},
 };
 
 use super::Call;

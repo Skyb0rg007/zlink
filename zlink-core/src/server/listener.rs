@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use crate::{connection::Socket, Connection, Result};
+use crate::{Connection, Result, connection::Socket};
 
 /// A listener is a server that listens for incoming connections.
 pub trait Listener: core::fmt::Debug {

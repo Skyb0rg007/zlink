@@ -1,6 +1,6 @@
 //! Tests for Connection-level functionality.
 
-use crate::{test_utils::mock_socket::MockSocket, Connection};
+use crate::{Connection, test_utils::mock_socket::MockSocket};
 
 #[tokio::test]
 #[cfg(feature = "std")]

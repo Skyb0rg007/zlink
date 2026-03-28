@@ -7,7 +7,7 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use serde::Serialize;
 
-use super::{socket::WriteHalf, Call, Reply, BUFFER_SIZE};
+use super::{BUFFER_SIZE, Call, Reply, socket::WriteHalf};
 
 #[cfg(feature = "std")]
 use std::os::fd::OwnedFd;

@@ -5,7 +5,7 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 mod tests {
     use super::*;
     use serde_json::json;
-    use zlink::{test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, test_utils::mock_socket::MockSocket};
 
     #[tokio::test]
     async fn test_example_proxy() {

@@ -7,7 +7,7 @@ use std::{
         unix::net::UnixStream,
     },
 };
-use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
 #[proxy("org.example.FileService")]
 trait FileServiceProxy {

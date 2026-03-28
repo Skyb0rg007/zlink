@@ -3,9 +3,9 @@
 mod reply_stream;
 pub use reply_stream::ReplyStream;
 
-use crate::{connection::Socket, Call, Connection, Result};
+use crate::{Call, Connection, Result, connection::Socket};
 use core::fmt::Debug;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// A chain of method calls that will be sent together.
 ///

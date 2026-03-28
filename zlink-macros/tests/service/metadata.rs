@@ -1,8 +1,8 @@
 //! Tests for service with metadata attributes.
 
 use zlink::{
-    unix::{bind, connect},
     Server,
+    unix::{bind, connect},
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]

@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use crate::{
-    connection::{write_connection::WriteConnection, BUFFER_SIZE},
+    connection::{BUFFER_SIZE, write_connection::WriteConnection},
     test_utils::mock_socket::TestWriteHalf,
 };
 

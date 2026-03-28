@@ -2,10 +2,10 @@
 
 use super::basic::Balance;
 use zlink::{
+    Server,
     connection::socket::FetchPeerCredentials,
     introspect::{self},
     unix::{bind, connect},
-    Server,
 };
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
