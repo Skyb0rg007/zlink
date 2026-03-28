@@ -1,9 +1,9 @@
 use crate::{
-    connection::socket::{self, Socket},
     Result,
+    connection::socket::{self, Socket},
 };
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use tokio::net::{unix, UnixStream};
+use tokio::net::{UnixStream, unix};
 
 /// The connection type that uses Unix Domain Sockets for transport.
 pub type Connection = crate::Connection<Stream>;
@@ -59,18 +59,20 @@ impl socket::ReadHalf for ReadHalf {
     async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Vec<OwnedFd>)> {
         use std::{future::poll_fn, task::Poll};
 
-        poll_fn(|cx| loop {
-            let stream: &UnixStream = self.0.as_ref();
-            match stream.try_io(tokio::io::Interest::READABLE, || {
-                crate::unix_utils::recvmsg(stream, buf)
-            }) {
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    match stream.poll_read_ready(cx) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(res) => res?,
+        poll_fn(|cx| {
+            loop {
+                let stream: &UnixStream = self.0.as_ref();
+                match stream.try_io(tokio::io::Interest::READABLE, || {
+                    crate::unix_utils::recvmsg(stream, buf)
+                }) {
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        match stream.poll_read_ready(cx) {
+                            Poll::Pending => return Poll::Pending,
+                            Poll::Ready(res) => res?,
+                        }
                     }
+                    v => return Poll::Ready(v.map_err(Into::into)),
                 }
-                v => return Poll::Ready(v.map_err(Into::into)),
             }
         })
         .await
@@ -102,19 +104,21 @@ impl socket::WriteHalf for WriteHalf {
             // Use FDs on first write, empty slice on subsequent writes.
             let fds_to_send = if pos == 0 { &borrowed_fds[..] } else { &[] };
 
-            let n: usize = poll_fn(|cx| loop {
-                let stream: &UnixStream = self.0.as_ref();
-                match stream.try_io(tokio::io::Interest::WRITABLE, || {
-                    crate::unix_utils::sendmsg(stream, &buf[pos..], fds_to_send)
-                }) {
-                    Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        match stream.poll_write_ready(cx) {
-                            Poll::Pending => return Poll::Pending,
-                            Poll::Ready(res) => res?,
+            let n: usize = poll_fn(|cx| {
+                loop {
+                    let stream: &UnixStream = self.0.as_ref();
+                    match stream.try_io(tokio::io::Interest::WRITABLE, || {
+                        crate::unix_utils::sendmsg(stream, &buf[pos..], fds_to_send)
+                    }) {
+                        Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            match stream.poll_write_ready(cx) {
+                                Poll::Pending => return Poll::Pending,
+                                Poll::Ready(res) => res?,
+                            }
                         }
+                        Err(e) => return Poll::Ready(Err(e.into())),
                     }
-                    Err(e) => return Poll::Ready(Err(e.into())),
                 }
             })
             .await?;

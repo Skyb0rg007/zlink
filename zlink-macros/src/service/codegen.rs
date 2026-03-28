@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Error, GenericParam, ItemImpl, Type};
 
 use super::{attrs::ServiceAttrs, method::MethodInfo};

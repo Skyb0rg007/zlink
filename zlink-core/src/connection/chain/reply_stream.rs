@@ -4,12 +4,13 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use futures_util::stream::{unfold, Stream};
+use futures_util::stream::{Stream, unfold};
 use serde::de::DeserializeOwned;
 
 use crate::{
-    connection::{socket::ReadHalf, ReadConnection},
-    reply, Result,
+    Result,
+    connection::{ReadConnection, socket::ReadHalf},
+    reply,
 };
 
 #[cfg(feature = "std")]

@@ -1,6 +1,6 @@
 use crate::{
-    connection::socket::{self, Socket},
     Result,
+    connection::socket::{self, Socket},
 };
 use async_io::Async;
 use std::{
@@ -65,16 +65,18 @@ impl socket::ReadHalf for ReadHalf {
     async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Vec<OwnedFd>)> {
         use std::{future::poll_fn, task::Poll};
 
-        poll_fn(|cx| loop {
-            match crate::unix_utils::recvmsg(self.0.as_ref(), buf) {
-                Ok(result) => return Poll::Ready(Ok(result)),
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    match self.0.poll_readable(cx) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(res) => res?,
+        poll_fn(|cx| {
+            loop {
+                match crate::unix_utils::recvmsg(self.0.as_ref(), buf) {
+                    Ok(result) => return Poll::Ready(Ok(result)),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        match self.0.poll_readable(cx) {
+                            Poll::Pending => return Poll::Pending,
+                            Poll::Ready(res) => res?,
+                        }
                     }
+                    Err(e) => return Poll::Ready(Err(e.into())),
                 }
-                Err(e) => return Poll::Ready(Err(e.into())),
             }
         })
         .await
@@ -105,16 +107,18 @@ impl socket::WriteHalf for WriteHalf {
             // Use FDs on first write, empty slice on subsequent writes.
             let fds_to_send = if pos == 0 { &borrowed_fds[..] } else { &[] };
 
-            let n: usize = poll_fn(|cx| loop {
-                match crate::unix_utils::sendmsg(self.0.as_ref(), &buf[pos..], fds_to_send) {
-                    Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        match self.0.poll_writable(cx) {
-                            Poll::Pending => return Poll::Pending,
-                            Poll::Ready(res) => res?,
+            let n: usize = poll_fn(|cx| {
+                loop {
+                    match crate::unix_utils::sendmsg(self.0.as_ref(), &buf[pos..], fds_to_send) {
+                        Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            match self.0.poll_writable(cx) {
+                                Poll::Pending => return Poll::Pending,
+                                Poll::Ready(res) => res?,
+                            }
                         }
+                        Err(e) => return Poll::Ready(Err(e.into())),
                     }
-                    Err(e) => return Poll::Ready(Err(e.into())),
                 }
             })
             .await?;

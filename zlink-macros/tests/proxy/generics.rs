@@ -6,7 +6,7 @@ struct Error;
 #[tokio::test]
 async fn generic_test() {
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[derive(Debug, Serialize, Deserialize)]
     struct ProcessReply<'a> {
@@ -50,7 +50,7 @@ async fn generic_test() {
 #[tokio::test]
 async fn where_clause_test() {
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[derive(Debug, Serialize, Deserialize)]
     struct GetReply<'a> {

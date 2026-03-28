@@ -3,9 +3,9 @@
 #![cfg(test)]
 
 use crate::{
+    Call, Reply,
     connection::write_connection::WriteConnection,
     test_utils::mock_socket::{MockWriteHalf, TestWriteHalf},
-    Call, Reply,
 };
 use serde::{Deserialize, Serialize};
 use std::os::unix::net::UnixStream;

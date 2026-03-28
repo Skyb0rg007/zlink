@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn proxy_no_in_or_out_params() {
     use serde::{Deserialize, Serialize};
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[proxy("org.example.Basic")]
     trait BasicProxy {
@@ -26,7 +26,7 @@ async fn proxy_no_in_or_out_params() {
 
 #[tokio::test]
 async fn proxy_oneway_method() {
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[proxy("org.example.Basic")]
     trait BasicProxy {
@@ -48,7 +48,7 @@ async fn proxy_oneway_method() {
 async fn proxy_parameter_rename() {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use zlink::{proxy, test_utils::mock_socket::MockSocket, Connection};
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
     #[proxy("org.example.Basic")]
     trait BasicProxy {

@@ -56,8 +56,8 @@ pub mod socket;
 mod tests;
 mod write_connection;
 use crate::{
-    reply::{self, Reply},
     Call, Result,
+    reply::{self, Reply},
 };
 #[cfg(feature = "std")]
 use alloc::vec;

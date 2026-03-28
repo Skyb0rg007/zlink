@@ -137,7 +137,7 @@ impl MethodInfo {
                         &method.sig,
                         "streaming methods with return_fds must return \
                          a Stream<Item = (Reply<T>, Vec<OwnedFd>)>",
-                    ))
+                    ));
                 }
                 ReturnType::Type(_, ty) => {
                     let stream_item = extract_stream_item_type(ty).ok_or_else(|| {
@@ -189,7 +189,7 @@ impl MethodInfo {
                     return Err(Error::new_spanned(
                         &method.sig,
                         "streaming methods must return a Stream<Item = Reply<T>>",
-                    ))
+                    ));
                 }
                 ReturnType::Type(_, ty) => {
                     let stream_item = extract_stream_item_type(ty).ok_or_else(|| {
@@ -229,7 +229,7 @@ impl MethodInfo {
                     return Err(Error::new_spanned(
                         &method.sig,
                         "`return_fds` methods must have a return type",
-                    ))
+                    ));
                 }
                 ReturnType::Type(_, ty) => {
                     // Extract the first element of the tuple.

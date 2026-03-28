@@ -4,11 +4,11 @@
 //! Rust types defined in the parent module. Uses byte-based parsing to avoid UTF-8 overhead.
 
 use winnow::{
+    ModalResult, Parser,
     ascii::multispace0,
     combinator::{alt, separated},
     error::{ErrMode, InputError, ParserError},
     token::{literal, take_while},
-    ModalResult, Parser,
 };
 
 use super::{

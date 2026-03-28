@@ -3,8 +3,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    parse::{Parse, Parser},
     Error, ItemImpl,
+    parse::{Parse, Parser},
 };
 
 /// Attributes parsed from the `#[service(...)]` macro invocation.

@@ -2,9 +2,9 @@
 // We use the proxy macro to generate a type-safe client API.
 use std::{env::args, fmt::Display, net::IpAddr};
 
-use futures_util::{pin_mut, StreamExt};
+use futures_util::{StreamExt, pin_mut};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use zlink::{proxy, ReplyError};
+use zlink::{ReplyError, proxy};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

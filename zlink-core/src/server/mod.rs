@@ -7,7 +7,7 @@ use futures_util::{FutureExt, StreamExt};
 use select_all::SelectAll;
 use service::MethodReply;
 
-use crate::{connection::Socket, Call, Connection, Reply};
+use crate::{Call, Connection, Reply, connection::Socket};
 
 /// A server.
 ///

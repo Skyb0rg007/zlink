@@ -34,7 +34,7 @@ where
     /// `SelectAll`. The use case here is the Future impls created for `async fn` methods that are
     /// in reality `Unpin` but the compiler assumes they're `!Unpin`.
     pub(super) unsafe fn push_unchecked(&mut self, fut: &'f mut Fut) {
-        self.futures.push(Pin::new_unchecked(fut))
+        self.futures.push(unsafe { Pin::new_unchecked(fut) })
     }
 }
 

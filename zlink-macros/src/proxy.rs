@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-use syn::{parse::Parser, parse2, Error, FnArg, ItemTrait, Lit, Pat, TraitItem};
+use syn::{Error, FnArg, ItemTrait, Lit, Pat, TraitItem, parse::Parser, parse2};
 
 mod chain_extension;
 mod chain_method;
@@ -13,7 +13,7 @@ use chain_extension::generate_chain_extension_method;
 use chain_method::generate_chain_method;
 use method_impl::generate_method_impl;
 use types::MethodAttrs;
-use utils::{build_combined_where_clause, extract_param_attrs, ParamAttrs};
+use utils::{ParamAttrs, build_combined_where_clause, extract_param_attrs};
 
 pub(crate) fn proxy(attr: TokenStream, input: TokenStream) -> TokenStream {
     match proxy_impl(attr, input) {

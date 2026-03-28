@@ -105,7 +105,7 @@ where
                         this.cached
                             .take()
                             .map(|reply| Reply::new(Some(reply)).set_continues(Some(false))),
-                    )
+                    );
                 }
             }
         }

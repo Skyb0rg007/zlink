@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_quote, Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed};
+use syn::{Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed, parse_quote};
 
 use crate::utils::{convert_type_lifetimes, has_zlink_bool_attr, parse_zlink_string_attr};
 

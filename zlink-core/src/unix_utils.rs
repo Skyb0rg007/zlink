@@ -16,7 +16,7 @@ use crate::connection::Credentials;
 /// This is a low-level helper that performs the `recvmsg` syscall.
 #[doc(hidden)]
 pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<(usize, alloc::vec::Vec<OwnedFd>)> {
-    use rustix::net::{recvmsg, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
+    use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
     use std::io::IoSliceMut;
 
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
@@ -42,7 +42,7 @@ pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<(usize, alloc::vec::
 /// This is a low-level helper that performs the `sendmsg` syscall.
 #[doc(hidden)]
 pub fn sendmsg(fd: impl AsFd, buf: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<usize> {
-    use rustix::net::{sendmsg, SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
+    use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
     use std::io::IoSlice;
 
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
@@ -130,7 +130,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         let process_fd = {
             // FIXME: Replace `libc` usage with `rustix` API when it provides SO_PEERPIDFD
             // sockopt: https://github.com/bytecodealliance/rustix/pull/1474
-            use core::mem::{size_of, MaybeUninit};
+            use core::mem::{MaybeUninit, size_of};
 
             let mut pidfd = MaybeUninit::<libc::c_int>::zeroed();
             let mut len = size_of::<libc::c_int>() as libc::socklen_t;

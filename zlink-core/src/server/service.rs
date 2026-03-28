@@ -5,7 +5,7 @@ use core::{fmt::Debug, future::Future};
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 
-use crate::{connection::Socket, Call, Connection, Reply};
+use crate::{Call, Connection, Reply, connection::Socket};
 
 /// The item type that a [`Service::ReplyStream`] yields.
 ///

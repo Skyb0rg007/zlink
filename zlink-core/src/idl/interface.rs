@@ -202,12 +202,14 @@ mod tests {
         write!(idl, "{}", interface).unwrap();
         assert!(idl.as_str().starts_with("interface org.varlink.service"));
         assert!(idl.as_str().contains("method GetInfo()"));
-        assert!(idl
-            .as_str()
-            .contains("method GetInterfaceDescription(interface: string)"));
-        assert!(idl
-            .as_str()
-            .contains("error InterfaceNotFound (interface: string)"));
+        assert!(
+            idl.as_str()
+                .contains("method GetInterfaceDescription(interface: string)")
+        );
+        assert!(
+            idl.as_str()
+                .contains("error InterfaceNotFound (interface: string)")
+        );
         assert!(idl.as_str().contains("error PermissionDenied ()"));
 
         // Test parsing the official org.varlink.service IDL and compare with manually constructed
@@ -262,7 +264,7 @@ error ExpectedMore ()
     fn systemd_resolved_interface_parsing() {
         use alloc::vec::Vec;
 
-        use crate::idl::{parse, CustomObject, CustomType, TypeRef};
+        use crate::idl::{CustomObject, CustomType, TypeRef, parse};
 
         // Manually construct the systemd-resolved interface for comparison.
 

@@ -1,13 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashSet;
-use syn::{punctuated::Punctuated, Error, FnArg, Pat, Type};
+use syn::{Error, FnArg, Pat, Type, punctuated::Punctuated};
 
 use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
-        collect_used_type_params, convert_to_single_lifetime, parse_return_type,
-        snake_case_to_pascal_case, type_contains_lifetime, ParamAttrs,
+        ParamAttrs, collect_used_type_params, convert_to_single_lifetime, parse_return_type,
+        snake_case_to_pascal_case, type_contains_lifetime,
     },
 };
 use crate::utils::is_option_type;

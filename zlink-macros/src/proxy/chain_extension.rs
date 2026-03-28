@@ -5,8 +5,8 @@ use syn::{Error, FnArg, Pat};
 use super::{
     types::{ArgInfo, MethodAttrs},
     utils::{
-        convert_to_single_lifetime, parse_return_type, snake_case_to_pascal_case,
-        type_contains_lifetime, ParamAttrs,
+        ParamAttrs, convert_to_single_lifetime, parse_return_type, snake_case_to_pascal_case,
+        type_contains_lifetime,
     },
 };
 
