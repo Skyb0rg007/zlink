@@ -103,6 +103,13 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
     // Remove zlink attributes from method parameters.
     remove_zlink_param_attrs(&mut output_impl);
 
+    // Add `+ 'static` to streaming methods with `impl Trait` return types. This is required
+    // because the returned stream must outlive the `handle` call (it's stored in a Vec and polled
+    // independently). In Rust edition 2024, `impl Trait` captures all in-scope lifetimes by
+    // default, including the anonymous `&self` lifetime, making the stream non-`'static` without
+    // this explicit bound.
+    add_static_to_streaming_impl_trait(&mut output_impl, &methods_info);
+
     // Output the original impl block plus the generated Service impl.
     Ok(quote! {
         #output_impl
@@ -143,6 +150,42 @@ fn remove_zlink_param_attrs(item_impl: &mut ItemImpl) {
             };
 
             pat_type.attrs.retain(|attr| !attr.path().is_ident("zlink"));
+        }
+    }
+}
+
+/// Add `+ 'static` bound to streaming methods that return `impl Trait`.
+///
+/// The `Service` trait requires `ReplyStream` to be `'static` since the stream outlives the
+/// `handle` call. In Rust 2024, `impl Trait` captures all in-scope lifetimes including `&self`,
+/// so we must explicitly add `'static` to prevent the capture.
+fn add_static_to_streaming_impl_trait(item_impl: &mut ItemImpl, methods_info: &[MethodInfo]) {
+    let streaming_impl_trait_methods: std::collections::HashSet<_> = methods_info
+        .iter()
+        .filter(|m| m.is_streaming && m.stream_uses_impl_trait)
+        .map(|m| m.name.to_string())
+        .collect();
+
+    for item in &mut item_impl.items {
+        let ImplItem::Fn(method) = item else {
+            continue;
+        };
+
+        if !streaming_impl_trait_methods.contains(&method.sig.ident.to_string()) {
+            continue;
+        }
+
+        let syn::ReturnType::Type(_, return_type) = &mut method.sig.output else {
+            continue;
+        };
+
+        if let syn::Type::ImplTrait(impl_trait) = return_type.as_mut() {
+            impl_trait
+                .bounds
+                .push(syn::TypeParamBound::Lifetime(syn::Lifetime::new(
+                    "'static",
+                    proc_macro2::Span::call_site(),
+                )));
         }
     }
 }
