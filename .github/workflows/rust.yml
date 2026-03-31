@@ -100,6 +100,23 @@ jobs:
           cargo test -p zlink --release --no-default-features \
           --features tracing,smol,proxy,introspection,idl-parse,service
 
+  macos_test:
+    runs-on: macos-latest
+    needs: [fmt, clippy]
+    env:
+      RUSTFLAGS: -D warnings
+      RUST_BACKTRACE: full
+      RUST_LOG: trace
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and Test
+        run: |
+          cargo test --release --all-features
+
   # Test the `zlink-core`'s tests with miri.
   #
   # We only run a small set of tests that tests `unsafe` code. Running all tests takes an
