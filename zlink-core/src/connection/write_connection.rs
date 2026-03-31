@@ -28,6 +28,12 @@ pub struct WriteConnection<Write: WriteHalf> {
     id: usize,
     #[cfg(feature = "std")]
     pending_fds: VecDeque<MessageFds>,
+    // On macOS, SCM_RIGHTS does not properly hold a reference to the underlying file description
+    // when the sender closes the FD in the same process before the receiver calls `recvmsg`. The
+    // receiver ends up with a stale FD. We work around this by keeping sent FDs alive until the
+    // read half confirms it has called `recvmsg` for them via `drain_held_fds`.
+    #[cfg(all(feature = "std", target_os = "macos"))]
+    pub(super) held_fds: VecDeque<Vec<OwnedFd>>,
 }
 
 impl<Write: WriteHalf> WriteConnection<Write> {
@@ -40,6 +46,8 @@ impl<Write: WriteHalf> WriteConnection<Write> {
             pos: 0,
             #[cfg(feature = "std")]
             pending_fds: VecDeque::new(),
+            #[cfg(all(feature = "std", target_os = "macos"))]
+            held_fds: VecDeque::new(),
         }
     }
 
@@ -201,8 +209,11 @@ impl<Write: WriteHalf> WriteConnection<Write> {
 
                 // Send this message with its FDs.
                 let msg_end = fd_offset + msg_len;
-                let pending = self.pending_fds.pop_front().unwrap();
-                let fds = &pending.fds;
+                let MessageFds {
+                    fds,
+                    offset: _,
+                    len: _,
+                } = self.pending_fds.pop_front().unwrap();
                 trace!(
                     "connection {}: flushing {} bytes with {} FDs",
                     self.id,
@@ -210,9 +221,14 @@ impl<Write: WriteHalf> WriteConnection<Write> {
                     fds.len()
                 );
                 self.socket
-                    .write(&self.buffer[fd_offset..msg_end], fds)
+                    .write(&self.buffer[fd_offset..msg_end], &fds)
                     .await?;
                 sent_pos = msg_end;
+
+                // On macOS, keep sent FDs alive until the read half confirms receipt via
+                // `recvmsg`. See the comment on the `held_fds` field for details.
+                #[cfg(target_os = "macos")]
+                self.held_fds.push_back(fds);
             }
         }
 

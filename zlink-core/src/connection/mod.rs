@@ -150,6 +150,17 @@ where
         }
     }
 
+    /// Release sent FDs that the read half has confirmed receiving via `recvmsg`.
+    /// See `WriteConnection::held_fds` for details on the macOS kernel issue.
+    #[cfg(all(feature = "std", target_os = "macos"))]
+    fn drain_held_fds(&mut self) {
+        let to_drain = self.read.fd_recvs;
+        for _ in 0..to_drain {
+            self.write.held_fds.pop_front();
+        }
+        self.read.fd_recvs -= to_drain;
+    }
+
     /// The unique identifier of the connection.
     pub fn id(&self) -> usize {
         assert_eq!(self.read.id(), self.write.id());
@@ -233,6 +244,8 @@ where
     where
         ReplyParams: Serialize + Debug,
     {
+        #[cfg(all(feature = "std", target_os = "macos"))]
+        self.drain_held_fds();
         #[cfg(feature = "std")]
         {
             self.write.send_reply(reply, fds).await
@@ -254,6 +267,8 @@ where
     where
         ReplyError: Serialize + Debug,
     {
+        #[cfg(all(feature = "std", target_os = "macos"))]
+        self.drain_held_fds();
         #[cfg(feature = "std")]
         {
             self.write.send_error(error, fds).await
