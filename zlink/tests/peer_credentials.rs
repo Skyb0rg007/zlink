@@ -5,6 +5,7 @@
 #[path = "creds-utils.rs"]
 mod creds_utils;
 
+#[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use tempfile::TempDir;
 use zlink::Listener;

@@ -138,3 +138,60 @@ impl AsFd for WriteHalf {
 }
 
 impl socket::UnixSocket for WriteHalf {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::Write,
+        os::{
+            fd::{FromRawFd, IntoRawFd},
+            unix::net::UnixStream as StdUnixStream,
+        },
+    };
+
+    /// Verify that FD passing works when sender and receiver use **separate** connections (as in
+    /// cross-process communication). On macOS, same-connection FD passing requires a workaround
+    /// (see `WriteConnection::held_fds`), but separate connections should work without it because
+    /// FD number reuse between `sendmsg` and `recvmsg` cannot happen across different FD tables.
+    ///
+    /// This test intentionally uses split halves (`WriteConnection::send_reply`) rather than
+    /// `Connection::send_reply`, so the `drain_held_fds` workaround is never invoked. This
+    /// proves the workaround is not needed for cross-connection FD passing.
+    #[tokio::test]
+    async fn fd_passing_across_separate_connections() {
+        let (std_a, std_b) = StdUnixStream::pair().unwrap();
+        std_a.set_nonblocking(true).unwrap();
+        std_b.set_nonblocking(true).unwrap();
+
+        let conn_a = Connection::new(Stream::from(UnixStream::from_std(std_a).unwrap()));
+        let conn_b = Connection::new(Stream::from(UnixStream::from_std(std_b).unwrap()));
+
+        let (_, mut write_a) = conn_a.split();
+        let (mut read_b, _) = conn_b.split();
+
+        // Send 3 FDs one at a time, closing the sender's copy after each sendmsg.
+        for name in ["alpha", "beta", "gamma"] {
+            let (r, mut w) = StdUnixStream::pair().unwrap();
+            w.write_all(name.as_bytes()).unwrap();
+            drop(w);
+
+            let reply = crate::Reply::new(Some(name.to_string())).set_continues(Some(false));
+            write_a.send_reply(&reply, vec![r.into()]).await.unwrap();
+        }
+
+        // Receive and verify each FD has the correct data.
+        for name in ["alpha", "beta", "gamma"] {
+            let (reply, fds) = read_b.receive_reply::<String, ()>().await.unwrap();
+            let params = reply.unwrap().into_parameters().unwrap();
+            assert_eq!(params, name);
+            assert_eq!(fds.len(), 1);
+
+            let recv_fd = fds.into_iter().next().unwrap();
+            let mut stream = unsafe { StdUnixStream::from_raw_fd(recv_fd.into_raw_fd()) };
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut stream, &mut buf).unwrap();
+            assert_eq!(buf, name, "FD data mismatch for {name:?}");
+        }
+    }
+}

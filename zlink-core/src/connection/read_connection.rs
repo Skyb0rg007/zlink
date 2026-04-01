@@ -39,6 +39,10 @@ pub struct ReadConnection<Read: ReadHalf> {
     id: usize,
     #[cfg(feature = "std")]
     pending_fds: VecDeque<Vec<OwnedFd>>,
+    // Number of `recvmsg` calls that returned FDs. Used by `Connection` to drain
+    // `WriteConnection::held_fds` on macOS. See that field's comment for details.
+    #[cfg(all(feature = "std", target_os = "macos"))]
+    pub(super) fd_recvs: usize,
 }
 
 impl<Read: ReadHalf> ReadConnection<Read> {
@@ -52,6 +56,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             buffer: alloc::vec![0; BUFFER_SIZE],
             #[cfg(feature = "std")]
             pending_fds: VecDeque::new(),
+            #[cfg(all(feature = "std", target_os = "macos"))]
+            fd_recvs: 0,
         }
     }
 
@@ -202,6 +208,11 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             #[cfg(feature = "std")]
             if !fds.is_empty() {
                 self.pending_fds.push_back(fds);
+                // Track receipt so `Connection` can drain `WriteConnection::held_fds`.
+                #[cfg(target_os = "macos")]
+                {
+                    self.fd_recvs += 1;
+                }
             }
 
             if self.read_pos == self.buffer.len() {
