@@ -91,6 +91,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
             use rustix::fs::Gid;
 
             let mut nr_supp_gids = INITIAL_NUMBER_SUPPLEMENTARY_GROUPS;
+            let mut nr_supp_gids_in_bytes = nr_supp_gids * (size_of::<Gid>() as u32);
             let mut supp_gids: Vec<Gid> = Vec::with_capacity(nr_supp_gids as usize);
 
             loop {
@@ -100,7 +101,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
                         libc::SOL_SOCKET,
                         libc::SO_PEERGROUPS,
                         supp_gids.as_mut_ptr().cast(),
-                        &mut nr_supp_gids,
+                        &mut nr_supp_gids_in_bytes,
                     )
                 };
                 let err = io::Error::last_os_error();
@@ -111,6 +112,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
                 }
 
                 // If the number of groups returned is less than the requested size, we are done.
+                nr_supp_gids = nr_supp_gids_in_bytes / size_of::<Gid>() as u32;
                 if nr_supp_gids as usize <= supp_gids.capacity() {
                     supp_gids.shrink_to(nr_supp_gids as usize);
                     // SAFETY: `getsockopt` filled at least `nr_supp_gids` items in the buffer.
@@ -122,6 +124,9 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
                 // We let the standard Vector speculation over-allocation take place here on
                 // purpose.
                 supp_gids.reserve(nr_supp_gids as usize - supp_gids.capacity());
+                // SAFETY: The number of supplementary GIDs on Linux is bounded 65k which fits in
+                // u32.
+                nr_supp_gids_in_bytes = (supp_gids.capacity() as u32) * (size_of::<Gid>() as u32);
             }
 
             supp_gids
