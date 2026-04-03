@@ -113,6 +113,8 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
                 // If the number of groups returned is less than the requested size, we are done.
                 if nr_supp_gids as usize <= supp_gids.capacity() {
                     supp_gids.shrink_to(nr_supp_gids as usize);
+                    // SAFETY: `getsockopt` filled at least `nr_supp_gids` items in the buffer.
+                    unsafe { supp_gids.set_len(nr_supp_gids as usize) };
                     break;
                 }
 
