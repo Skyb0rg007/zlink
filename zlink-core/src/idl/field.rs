@@ -44,7 +44,7 @@ impl<'a> Field<'a> {
     }
 
     /// Returns the type of the field.
-    pub fn ty(&self) -> &Type<'a> {
+    pub const fn ty(&self) -> &Type<'a> {
         self.ty.inner()
     }
 

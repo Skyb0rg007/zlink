@@ -19,6 +19,8 @@ mod introspection;
 mod metadata;
 #[path = "service/multiple_interfaces.rs"]
 mod multiple_interfaces;
+#[path = "service/per_interface_types.rs"]
+mod per_interface_types;
 #[path = "service/streaming.rs"]
 mod streaming;
 #[path = "service/streaming_errors.rs"]
