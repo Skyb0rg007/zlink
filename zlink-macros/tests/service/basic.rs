@@ -9,27 +9,22 @@ use zlink::{
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn service_macro_basic() -> Result<(), Box<dyn std::error::Error>> {
-    // Remove the socket file if it exists (from a previous run of this test).
-    let socket_path = "/tmp/zlink-service-macro-test.sock";
-    if let Err(e) = tokio::fs::remove_file(socket_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
 
     // Setup the server and run it in a separate task.
-    let listener = bind(socket_path).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let service = BankAccount::new(1000, false);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
-        res = run_client(socket_path) => res?,
+        res = run_client(&socket_path) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = connect(socket_path).await?;
 
     // Test GetBalance method - returns plain value, no Result.

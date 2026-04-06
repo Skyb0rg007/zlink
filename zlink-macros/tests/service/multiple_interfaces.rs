@@ -9,16 +9,11 @@ use zlink::{
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn multiple_interfaces() -> Result<(), Box<dyn std::error::Error>> {
-    // Remove the socket file if it exists.
-    let socket_path = "/tmp/zlink-service-macro-multi-iface-test.sock";
-    if let Err(e) = tokio::fs::remove_file(socket_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
 
     // Setup the server with the multi-interface service.
-    let listener = bind(socket_path).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let service = MultiInterfaceService {
         user_authenticated: false,
         items: vec!["apple".to_string(), "banana".to_string()],
@@ -26,13 +21,13 @@ async fn multiple_interfaces() -> Result<(), Box<dyn std::error::Error>> {
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
-        res = run_client(socket_path) => res?,
+        res = run_client(&socket_path) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = connect(socket_path).await?;
 
     // Test org.example.auth interface.
