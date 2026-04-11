@@ -73,13 +73,18 @@ impl<'a> fmt::Display for CustomEnum<'a> {
         if has_variant_comments {
             // Multi-line format when any variant has comments
             writeln!(f, "type {} (", self.name)?;
-            for variant in self.variants.iter() {
+            let last = self.variants.len().saturating_sub(1);
+            for (i, variant) in self.variants.iter().enumerate() {
                 // Write comments first
                 for comment in variant.comments() {
                     writeln!(f, "\t{}", comment)?;
                 }
                 // Then write the variant name
-                writeln!(f, "\t{}", variant.name())?;
+                if i == last {
+                    writeln!(f, "\t{}", variant.name())?;
+                } else {
+                    writeln!(f, "\t{},", variant.name())?;
+                }
             }
             write!(f, ")")
         } else {
@@ -143,7 +148,7 @@ mod tests {
         write!(&mut displayed, "{}", custom_enum).unwrap();
         assert_eq!(
             displayed,
-            "type Status (\n\t# The active state\n\tactive\n\tinactive\n)"
+            "type Status (\n\t# The active state\n\tactive,\n\tinactive\n)"
         );
     }
 
@@ -212,7 +217,7 @@ mod tests {
         write!(&mut displayed, "{}", enum_with_comments).unwrap();
         assert_eq!(
             displayed,
-            "type Color (\n\t# Primary color\n\tred\n\tgreen\n\tblue\n)"
+            "type Color (\n\t# Primary color\n\tred,\n\tgreen,\n\tblue\n)"
         );
     }
 }
