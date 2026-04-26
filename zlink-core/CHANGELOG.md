@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.2 - 2026-04-26
+
+### Changed
+- ♻️ Replace remaining manual byte loops in IDL parser.
+- ♻️ Rewrite parameter list and type body with combinators. #256
+- ♻️ Rewrite inline struct/enum parsers with combinators. #254
+- ♻️ Dispatch inline types with `alt` instead of byte lookahead. #253
+
+### Documentation
+- 📝 Configure docs.rs to build for all supported targets.
+
+### Fixed
+- 🐛 fix missing comma in enum with comments.
+- 🐛 Workaround FD-passing on the same connection on Mac.
+
 ## 0.4.1 - 2026-03-28
 
 ### Added
