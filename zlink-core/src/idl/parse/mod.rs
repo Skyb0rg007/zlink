@@ -6,7 +6,7 @@
 use winnow::{
     ModalResult, Parser,
     ascii::multispace0,
-    combinator::{alt, separated},
+    combinator::{alt, delimited, separated},
     error::{ErrMode, InputError, ParserError},
     token::{literal, take_while},
 };
@@ -138,30 +138,47 @@ fn field<'a>(input: &mut &'a [u8]) -> ModalResult<Field<'a>, InputError<&'a [u8]
     Ok(Field::new_owned(name, ty, comments))
 }
 
+/// Separator between fields/variants of a comma-separated list.
+///
+/// `whitespace_only` after the comma leaves any comments in the input so
+/// that the next item's `parse_preceding_comments` can pick them up.
+fn field_separator<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
+    (whitespace_only, literal(","), whitespace_only)
+        .void()
+        .parse_next(input)
+}
+
 /// Parse an inline struct type: (field1: type1, field2: type2).
 fn struct_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [u8]>> {
-    literal("(").parse_next(input)?;
-    ws(input)?;
-    let fields: Vec<Field<'a>> = separated(0.., field, (ws, literal(","), ws)).parse_next(input)?;
-    ws(input)?;
-    literal(")").parse_next(input)?;
-    Ok(Type::Object(List::from(fields)))
+    delimited(
+        // Leading whitespace is consumed here so empty/whitespace-only structs
+        // parse without being mistaken for a field.
+        (literal("("), whitespace_only),
+        separated(0.., field, field_separator),
+        // `ws` (not `whitespace_only`) so a final comment before `)` (e.g.
+        // `(# comment\n)`) is consumed.
+        (ws, literal(")")),
+    )
+    .map(|fields: Vec<Field<'a>>| Type::Object(List::from(fields)))
+    .parse_next(input)
+}
+
+/// Parse an enum variant: any preceding comments followed by the variant name.
+fn enum_variant<'a>(input: &mut &'a [u8]) -> ModalResult<EnumVariant<'a>, InputError<&'a [u8]>> {
+    let comments = parse_preceding_comments(input)?;
+    let name = field_name(input)?;
+    Ok(EnumVariant::new_owned(name, comments))
 }
 
 /// Parse an inline enum type: (variant1, variant2, variant3).
 fn enum_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [u8]>> {
-    literal("(").parse_next(input)?;
-    ws(input)?;
-    let variant_names: Vec<&str> =
-        separated(0.., field_name, (ws, literal(","), ws)).parse_next(input)?;
-    ws(input)?;
-    literal(")").parse_next(input)?;
-
-    let variants: Vec<EnumVariant<'a>> = variant_names
-        .into_iter()
-        .map(|name| EnumVariant::new(name, &[]))
-        .collect();
-    Ok(Type::Enum(List::from(variants)))
+    delimited(
+        (literal("("), whitespace_only),
+        separated(0.., enum_variant, field_separator),
+        (ws, literal(")")),
+    )
+    .map(|variants: Vec<EnumVariant<'a>>| Type::Enum(List::from(variants)))
+    .parse_next(input)
 }
 
 /// Parse an inline type (struct or enum).

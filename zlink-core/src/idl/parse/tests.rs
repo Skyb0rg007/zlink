@@ -925,6 +925,79 @@ fn parse_field(input: &str) -> Result<Field<'_>, crate::Error> {
 }
 
 #[test]
+fn nested_struct_field_comments() {
+    // Comments on fields of a nested inline struct were dropped because the
+    // struct parser consumed them as plain whitespace.
+    let input = r#"
+interface a.b
+
+method M (
+    # works
+    x: (
+        # doesn't work
+        y: bool
+    )
+) -> ()
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 1);
+
+    let outer_comments: Vec<_> = inputs[0].comments().collect();
+    assert_eq!(outer_comments.len(), 1);
+    assert_eq!(outer_comments[0].text(), "works");
+
+    let Type::Object(nested_fields) = inputs[0].ty() else {
+        panic!(
+            "Expected x to be an inline struct, got: {:?}",
+            inputs[0].ty()
+        );
+    };
+    let nested_fields: Vec<_> = nested_fields.iter().collect();
+    assert_eq!(nested_fields.len(), 1);
+    assert_eq!(nested_fields[0].name(), "y");
+    let nested_comments: Vec<_> = nested_fields[0].comments().collect();
+    assert_eq!(nested_comments.len(), 1);
+    assert_eq!(nested_comments[0].text(), "doesn't work");
+}
+
+#[test]
+fn nested_enum_variant_comments() {
+    // Variants of a nested inline enum should retain their preceding comments.
+    let input = r#"
+interface a.b
+
+method M (
+    x: (
+        # the no variant
+        no,
+        # the yes variant
+        yes
+    )
+) -> ()
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    let Type::Enum(variants) = inputs[0].ty() else {
+        panic!("Expected x to be an inline enum, got: {:?}", inputs[0].ty());
+    };
+    let variants: Vec<_> = variants.iter().collect();
+    assert_eq!(variants.len(), 2);
+    assert_eq!(variants[0].name(), "no");
+    let no_comments: Vec<_> = variants[0].comments().collect();
+    assert_eq!(no_comments.len(), 1);
+    assert_eq!(no_comments[0].text(), "the no variant");
+    assert_eq!(variants[1].name(), "yes");
+    let yes_comments: Vec<_> = variants[1].comments().collect();
+    assert_eq!(yes_comments.len(), 1);
+    assert_eq!(yes_comments[0].text(), "the yes variant");
+}
+
+#[test]
 fn method_with_parameter_comments() {
     let input = r#"
 interface org.example.test
