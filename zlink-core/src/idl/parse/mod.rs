@@ -5,10 +5,10 @@
 
 use winnow::{
     ModalResult, Parser,
-    ascii::multispace0,
-    combinator::{alt, delimited, opt, preceded, separated},
+    ascii::{multispace0, multispace1},
+    combinator::{alt, delimited, opt, preceded, repeat, separated},
     error::{ErrMode, InputError, ParserError},
-    token::{literal, take_while},
+    token::{literal, one_of, take_while},
 };
 
 use super::{
@@ -18,55 +18,27 @@ use super::{
 
 use alloc::{format, vec::Vec};
 
+/// Parse a `# ... eol` comment as inter-token whitespace, discarding its
+/// content. Used by [`ws`].
+fn comment_as_ws<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
+    (
+        literal("#"),
+        take_while(0.., |c: u8| c != b'\n' && c != b'\r'),
+        opt(alt((literal("\r\n"), literal("\n"), literal("\r")))),
+    )
+        .void()
+        .parse_next(input)
+}
+
 /// Parse whitespace and comments according to Varlink grammar.
-/// The `_` production in Varlink grammar: whitespace / comment / eol_r
+/// The `_` production in Varlink grammar: whitespace / comment / eol_r.
 fn ws<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
-    loop {
-        let start_len = input.len();
-
-        // Consume regular whitespace (spaces, tabs, etc.)
-        multispace0::<_, InputError<&'a [u8]>>
-            .parse_next(input)
-            .ok();
-
-        // Try to consume a comment: "#" [^\n\r\u{2028}\u{2029}]* eol_r
-        if input.starts_with(b"#") {
-            // Skip the '#'
-            *input = &input[1..];
-
-            // Consume everything until end of line
-            while !input.is_empty() {
-                match input[0] {
-                    b'\n' | b'\r' => {
-                        // Consume the end-of-line character(s)
-                        if input.starts_with(b"\r\n") {
-                            *input = &input[2..];
-                        } else {
-                            *input = &input[1..];
-                        }
-                        break;
-                    }
-                    _ => {
-                        *input = &input[1..];
-                    }
-                }
-            }
-        }
-
-        // If we didn't consume anything in this iteration, break
-        if input.len() == start_len {
-            break;
-        }
-    }
-    Ok(())
+    repeat(0.., alt((multispace1.void(), comment_as_ws))).parse_next(input)
 }
 
 /// Parse only whitespace (not comments) - used in interface parsing where comments are members.
 fn whitespace_only<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
-    multispace0::<_, InputError<&'a [u8]>>
-        .parse_next(input)
-        .ok();
-    Ok(())
+    multispace0.void().parse_next(input)
 }
 
 /// Convert bytes to str with input lifetime.
@@ -77,40 +49,24 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
 
 /// Parse a field name: starts with letter, continues with alphanumeric and underscores.
 fn field_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    let start = *input;
-    let mut pos = 0;
-
-    // First character must be alphabetic
-    if pos >= input.len() || !input[pos].is_ascii_alphabetic() {
-        return Err(ErrMode::Backtrack(ParserError::from_input(input)));
-    }
-    pos += 1;
-
-    // Continue with alphanumeric and underscores
-    while pos < input.len() && (input[pos].is_ascii_alphanumeric() || input[pos] == b'_') {
-        pos += 1;
-    }
-
-    let name_bytes = &start[0..pos];
-    *input = &input[pos..];
-    Ok(bytes_to_str(name_bytes))
+    (
+        one_of(|c: u8| c.is_ascii_alphabetic()),
+        take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'_'),
+    )
+        .take()
+        .map(bytes_to_str)
+        .parse_next(input)
 }
 
 /// Parse a type name: starts with uppercase letter, continues with alphanumeric.
 fn type_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    let start = *input;
-    if input.is_empty() || !input[0].is_ascii_uppercase() {
-        return Err(ErrMode::Backtrack(ParserError::from_input(input)));
-    }
-
-    let mut end = 1;
-    while end < input.len() && input[end].is_ascii_alphanumeric() {
-        end += 1;
-    }
-
-    let name_bytes = &start[0..end];
-    *input = &input[end..];
-    Ok(bytes_to_str(name_bytes))
+    (
+        one_of(|c: u8| c.is_ascii_uppercase()),
+        take_while(0.., |c: u8| c.is_ascii_alphanumeric()),
+    )
+        .take()
+        .map(bytes_to_str)
+        .parse_next(input)
 }
 
 /// Parse a primitive type.
@@ -228,47 +184,33 @@ fn varlink_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'
     alt((optional_type, array_type, map_type, element_type)).parse_next(input)
 }
 
-/// Parse an interface name: reverse domain notation like org.example.test.
+/// Parse an interface name: reverse domain notation like `org.example.test`.
+///
+/// Grammar:
+///   first segment      = [A-Za-z][A-Za-z0-9-]*
+///   subsequent segment = "." [A-Za-z0-9][A-Za-z0-9-]*
+///   name               = first_segment subsequent_segment+
 fn interface_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&'a [u8]>> {
-    let start = *input;
-    let mut pos = 0;
-
-    // First segment: [A-Za-z]([-]*[A-Za-z0-9])*
-    if pos >= input.len() || !input[pos].is_ascii_alphabetic() {
-        return Err(ErrMode::Backtrack(ParserError::from_input(input)));
-    }
-    pos += 1;
-
-    while pos < input.len() && (input[pos].is_ascii_alphanumeric() || input[pos] == b'-') {
-        pos += 1;
-    }
-
-    let mut found_dot = false;
-    // Subsequent segments: .[A-Za-z0-9]([-]*[A-Za-z0-9])*
-    while pos < input.len() && input[pos] == b'.' {
-        found_dot = true;
-        pos += 1; // skip dot
-
-        // Must have at least one alphanumeric after dot
-        if pos >= input.len() || !input[pos].is_ascii_alphanumeric() {
-            break;
-        }
-        pos += 1;
-
-        // Continue with alphanumeric and dashes
-        while pos < input.len() && (input[pos].is_ascii_alphanumeric() || input[pos] == b'-') {
-            pos += 1;
-        }
-    }
-
-    // Check for at least one dot
-    if !found_dot {
-        return Err(ErrMode::Backtrack(ParserError::from_input(input)));
-    }
-
-    let name_bytes = &start[0..pos];
-    *input = &input[pos..];
-    Ok(bytes_to_str(name_bytes))
+    (
+        // First segment.
+        (
+            one_of(|c: u8| c.is_ascii_alphabetic()),
+            take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
+        ),
+        // One or more dotted segments (so the name has at least one `.`).
+        repeat::<_, _, (), _, _>(
+            1..,
+            (
+                literal("."),
+                one_of(|c: u8| c.is_ascii_alphanumeric()),
+                take_while(0.., |c: u8| c.is_ascii_alphanumeric() || c == b'-'),
+            )
+                .void(),
+        ),
+    )
+        .take()
+        .map(bytes_to_str)
+        .parse_next(input)
 }
 
 /// Parse a parameter list: (param1: type1, param2: type2).
@@ -383,45 +325,39 @@ fn type_def<'a>(input: &mut &'a [u8]) -> ModalResult<CustomType<'a>, InputError<
     }
 }
 
-/// Parse a member definition (type, method, or error).
-/// Helper function to parse any preceding comments.
+/// Parse zero or more comments that precede a definition. Whitespace before,
+/// between, and after the comments is consumed; if no comment is found, the
+/// input is left untouched.
 fn parse_preceding_comments<'a>(
     input: &mut &'a [u8],
 ) -> ModalResult<Vec<Comment<'a>>, InputError<&'a [u8]>> {
-    let mut comments = Vec::new();
-    while !input.is_empty() {
-        let checkpoint = *input;
-        whitespace_only(input)?;
-
-        if input.is_empty() {
-            break;
-        }
-
-        if let Ok(comment) = comment_def(input) {
-            comments.push(comment);
-            whitespace_only(input)?;
-        } else {
-            // Not a comment, restore position
-            *input = checkpoint;
-            break;
-        }
-    }
-    Ok(comments)
+    repeat(
+        0..,
+        delimited(whitespace_only, comment_def, whitespace_only),
+    )
+    .parse_next(input)
 }
 
+/// Parse a single `# ...` comment up to (but not including) the end of line.
+/// Leading spaces and tabs after `#` are stripped from the captured content.
 fn comment_def<'a>(input: &mut &'a [u8]) -> ModalResult<Comment<'a>, InputError<&'a [u8]>> {
-    literal("#").parse_next(input)?;
+    preceded(
+        (
+            literal("#"),
+            take_while(0.., |c: u8| c == b' ' || c == b'\t'),
+        ),
+        take_while(0.., |c: u8| c != b'\n'),
+    )
+    .map(|content| Comment::new(bytes_to_str(content)))
+    .parse_next(input)
+}
 
-    // Skip all leading whitespace after #
-    while !input.is_empty() && (input[0] == b' ' || input[0] == b'\t') {
-        *input = &input[1..];
-    }
-
-    // Take until newline or end of input - this is the actual comment content
-    let line_content = take_while(0.., |c: u8| c != b'\n').parse_next(input)?;
-    let comment_text = bytes_to_str(line_content);
-
-    Ok(Comment::new(comment_text))
+/// One member of an interface body, used inside `interface_def` to collect
+/// the three member kinds via a single `repeat`.
+enum InterfaceMember<'a> {
+    Custom(CustomType<'a>),
+    Method(Method<'a>),
+    Error(Error<'a>),
 }
 
 /// Parse an interface definition.
@@ -431,38 +367,28 @@ fn interface_def<'a>(input: &mut &'a [u8]) -> ModalResult<Interface<'a>, InputEr
     literal("interface").parse_next(input)?;
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
     let name = interface_name(input)?;
-    whitespace_only(input)?;
 
-    // Parse members separated by whitespace/newlines
+    let members: Vec<InterfaceMember<'a>> = repeat(
+        0..,
+        preceded(
+            whitespace_only,
+            alt((
+                type_def.map(InterfaceMember::Custom),
+                method_def.map(InterfaceMember::Method),
+                error_def.map(InterfaceMember::Error),
+            )),
+        ),
+    )
+    .parse_next(input)?;
+
     let mut methods = Vec::new();
     let mut custom_types = Vec::new();
     let mut errors = Vec::new();
-
-    while !input.is_empty() {
-        whitespace_only(input)?;
-
-        if input.is_empty() {
-            break;
-        }
-
-        enum ParsedMember<'a> {
-            Custom(CustomType<'a>),
-            Method(Method<'a>),
-            Error(Error<'a>),
-        }
-
-        let result = alt((
-            type_def.map(ParsedMember::Custom),
-            method_def.map(ParsedMember::Method),
-            error_def.map(ParsedMember::Error),
-        ))
-        .parse_next(input);
-
-        match result {
-            Ok(ParsedMember::Custom(custom_type)) => custom_types.push(custom_type),
-            Ok(ParsedMember::Method(method)) => methods.push(method),
-            Ok(ParsedMember::Error(error)) => errors.push(error),
-            Err(_) => break,
+    for m in members {
+        match m {
+            InterfaceMember::Custom(c) => custom_types.push(c),
+            InterfaceMember::Method(m) => methods.push(m),
+            InterfaceMember::Error(e) => errors.push(e),
         }
     }
 
