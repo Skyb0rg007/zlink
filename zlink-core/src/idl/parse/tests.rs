@@ -93,6 +93,42 @@ fn parse_inline_struct() {
 }
 
 #[test]
+fn parse_inline_empty_struct() {
+    // Empty `()` must be parsed as a (empty) struct per the Varlink grammar.
+    // An empty enum cannot be instantiated, so the grammar reserves `()` for
+    // structs.
+    match parse_type("()").unwrap() {
+        Type::Object(fields) => {
+            assert_eq!(fields.iter().count(), 0);
+        }
+        other => panic!("Expected empty struct, got: {other:?}"),
+    }
+
+    // Whitespace-only and comment-only content is also empty per the
+    // grammar's `_` production.
+    assert!(matches!(parse_type("(   )").unwrap(), Type::Object(_)));
+    assert!(matches!(
+        parse_type("(# comment\n)").unwrap(),
+        Type::Object(_)
+    ));
+
+    // Also exercise the issue's reported context: an inline empty struct used
+    // as a field type within a custom type.
+    let custom_type = parse_custom_type("type T (x: ())").unwrap();
+    let object = custom_type
+        .as_object()
+        .expect("expected struct-like custom type");
+    let field = object.fields().next().expect("expected field x");
+    assert_eq!(field.name(), "x");
+    match field.ty() {
+        Type::Object(fields) => {
+            assert_eq!(fields.iter().count(), 0);
+        }
+        other => panic!("Expected x to be an empty struct, got: {other:?}"),
+    }
+}
+
+#[test]
 fn parse_whitespace() {
     // Test that whitespace is handled correctly
     assert_eq!(parse_type("  bool  ").unwrap(), Type::Bool);
@@ -886,6 +922,129 @@ fn parse_custom_type(input: &str) -> Result<CustomType<'_>, crate::Error> {
 /// Parse a field from a string.
 fn parse_field(input: &str) -> Result<Field<'_>, crate::Error> {
     parse_from_str(input, field)
+}
+
+#[test]
+fn trailing_comment_after_parameter() {
+    // The parser used to fail when a comment appeared between a parameter's
+    // type and the closing `)` (or comma).
+    let input = r#"
+interface a.b
+
+method M (
+    x: bool #
+) -> ()
+    "#;
+    let interface = parse_interface(input).expect("trailing `#` should parse");
+    let methods: Vec<_> = interface.methods().collect();
+    assert_eq!(methods[0].name(), "M");
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].name(), "x");
+    assert_eq!(inputs[0].ty(), &Type::Bool);
+
+    // Same with content, between params and before closing paren of an inline
+    // struct, plus between a custom-type field and `)`.
+    let input = r#"
+interface a.b
+
+type T (
+    a: bool, # trailing for a
+    b: int # trailing for b
+)
+
+method M (
+    x: (
+        y: bool # trailing inside nested struct
+    ),
+    z: int # trailing for z
+) -> ()
+    "#;
+    let interface = parse_interface(input).expect("trailing comments should parse");
+    let custom = interface.custom_types().next().unwrap();
+    assert_eq!(custom.name(), "T");
+    assert_eq!(custom.as_object().unwrap().fields().count(), 2);
+
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 2);
+    let Type::Object(nested) = inputs[0].ty() else {
+        panic!("Expected x to be an inline struct");
+    };
+    assert_eq!(nested.iter().count(), 1);
+}
+
+#[test]
+fn nested_struct_field_comments() {
+    // Comments on fields of a nested inline struct were dropped because the
+    // struct parser consumed them as plain whitespace.
+    let input = r#"
+interface a.b
+
+method M (
+    # works
+    x: (
+        # doesn't work
+        y: bool
+    )
+) -> ()
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 1);
+
+    let outer_comments: Vec<_> = inputs[0].comments().collect();
+    assert_eq!(outer_comments.len(), 1);
+    assert_eq!(outer_comments[0].text(), "works");
+
+    let Type::Object(nested_fields) = inputs[0].ty() else {
+        panic!(
+            "Expected x to be an inline struct, got: {:?}",
+            inputs[0].ty()
+        );
+    };
+    let nested_fields: Vec<_> = nested_fields.iter().collect();
+    assert_eq!(nested_fields.len(), 1);
+    assert_eq!(nested_fields[0].name(), "y");
+    let nested_comments: Vec<_> = nested_fields[0].comments().collect();
+    assert_eq!(nested_comments.len(), 1);
+    assert_eq!(nested_comments[0].text(), "doesn't work");
+}
+
+#[test]
+fn nested_enum_variant_comments() {
+    // Variants of a nested inline enum should retain their preceding comments.
+    let input = r#"
+interface a.b
+
+method M (
+    x: (
+        # the no variant
+        no,
+        # the yes variant
+        yes
+    )
+) -> ()
+    "#;
+
+    let interface = parse_interface(input).unwrap();
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    let Type::Enum(variants) = inputs[0].ty() else {
+        panic!("Expected x to be an inline enum, got: {:?}", inputs[0].ty());
+    };
+    let variants: Vec<_> = variants.iter().collect();
+    assert_eq!(variants.len(), 2);
+    assert_eq!(variants[0].name(), "no");
+    let no_comments: Vec<_> = variants[0].comments().collect();
+    assert_eq!(no_comments.len(), 1);
+    assert_eq!(no_comments[0].text(), "the no variant");
+    assert_eq!(variants[1].name(), "yes");
+    let yes_comments: Vec<_> = variants[1].comments().collect();
+    assert_eq!(yes_comments.len(), 1);
+    assert_eq!(yes_comments[0].text(), "the yes variant");
 }
 
 #[test]
