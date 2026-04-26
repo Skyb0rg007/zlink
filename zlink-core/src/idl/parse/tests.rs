@@ -925,6 +925,56 @@ fn parse_field(input: &str) -> Result<Field<'_>, crate::Error> {
 }
 
 #[test]
+fn trailing_comment_after_parameter() {
+    // The parser used to fail when a comment appeared between a parameter's
+    // type and the closing `)` (or comma).
+    let input = r#"
+interface a.b
+
+method M (
+    x: bool #
+) -> ()
+    "#;
+    let interface = parse_interface(input).expect("trailing `#` should parse");
+    let methods: Vec<_> = interface.methods().collect();
+    assert_eq!(methods[0].name(), "M");
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].name(), "x");
+    assert_eq!(inputs[0].ty(), &Type::Bool);
+
+    // Same with content, between params and before closing paren of an inline
+    // struct, plus between a custom-type field and `)`.
+    let input = r#"
+interface a.b
+
+type T (
+    a: bool, # trailing for a
+    b: int # trailing for b
+)
+
+method M (
+    x: (
+        y: bool # trailing inside nested struct
+    ),
+    z: int # trailing for z
+) -> ()
+    "#;
+    let interface = parse_interface(input).expect("trailing comments should parse");
+    let custom = interface.custom_types().next().unwrap();
+    assert_eq!(custom.name(), "T");
+    assert_eq!(custom.as_object().unwrap().fields().count(), 2);
+
+    let methods: Vec<_> = interface.methods().collect();
+    let inputs: Vec<_> = methods[0].inputs().collect();
+    assert_eq!(inputs.len(), 2);
+    let Type::Object(nested) = inputs[0].ty() else {
+        panic!("Expected x to be an inline struct");
+    };
+    assert_eq!(nested.iter().count(), 1);
+}
+
+#[test]
 fn nested_struct_field_comments() {
     // Comments on fields of a nested inline struct were dropped because the
     // struct parser consumed them as plain whitespace.

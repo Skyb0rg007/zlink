@@ -6,7 +6,7 @@
 use winnow::{
     ModalResult, Parser,
     ascii::multispace0,
-    combinator::{alt, delimited, separated},
+    combinator::{alt, delimited, opt, preceded, separated},
     error::{ErrMode, InputError, ParserError},
     token::{literal, take_while},
 };
@@ -140,12 +140,12 @@ fn field<'a>(input: &mut &'a [u8]) -> ModalResult<Field<'a>, InputError<&'a [u8]
 
 /// Separator between fields/variants of a comma-separated list.
 ///
-/// `whitespace_only` after the comma leaves any comments in the input so
-/// that the next item's `parse_preceding_comments` can pick them up.
+/// `ws` before the comma consumes any whitespace and trailing comments
+/// that follow the previous item (e.g. `x: bool # trailing`). After the
+/// comma, `whitespace_only` consumes only whitespace, leaving any comments
+/// in the input for the next item's `parse_preceding_comments` to attach.
 fn field_separator<'a>(input: &mut &'a [u8]) -> ModalResult<(), InputError<&'a [u8]>> {
-    (whitespace_only, literal(","), whitespace_only)
-        .void()
-        .parse_next(input)
+    (ws, literal(","), whitespace_only).void().parse_next(input)
 }
 
 /// Parse an inline struct type: (field1: type1, field2: type2).
@@ -275,54 +275,12 @@ fn interface_name<'a>(input: &mut &'a [u8]) -> ModalResult<&'a str, InputError<&
 fn parameter_list<'a>(
     input: &mut &'a [u8],
 ) -> ModalResult<Vec<Parameter<'a>>, InputError<&'a [u8]>> {
-    literal("(").parse_next(input)?;
-    whitespace_only(input)?;
-
-    let mut params = Vec::new();
-
-    // Handle empty parameter list
-    if literal::<_, _, InputError<&'a [u8]>>(")")
-        .parse_next(input)
-        .is_ok()
-    {
-        return Ok(params);
-    }
-
-    // Parse first parameter with any preceding comments
-    loop {
-        // Parse any preceding comments for this parameter
-        let comments = parse_preceding_comments(input)?;
-
-        // Parse the parameter itself (field name and type)
-        let name = field_name(input)?;
-        ws(input)?;
-        literal(":").parse_next(input)?;
-        ws(input)?;
-        let ty = varlink_type(input)?;
-
-        params.push(Parameter::new_owned(name, ty, comments));
-
-        whitespace_only(input)?;
-
-        // Check for comma (more parameters) or closing paren (end)
-        if literal::<_, _, InputError<&'a [u8]>>(",")
-            .parse_next(input)
-            .is_ok()
-        {
-            whitespace_only(input)?;
-            // Continue to next parameter
-        } else if literal::<_, _, InputError<&'a [u8]>>(")")
-            .parse_next(input)
-            .is_ok()
-        {
-            // End of parameter list
-            break;
-        } else {
-            return Err(ErrMode::Backtrack(ParserError::from_input(input)));
-        }
-    }
-
-    Ok(params)
+    delimited(
+        (literal("("), whitespace_only),
+        separated(0.., field, field_separator),
+        (ws, literal(")")),
+    )
+    .parse_next(input)
 }
 
 /// Parse a method definition: method Name(inputs) -> (outputs).
@@ -360,6 +318,28 @@ fn error_def<'a>(input: &mut &'a [u8]) -> ModalResult<Error<'a>, InputError<&'a 
     Ok(Error::new_owned(name, params, comments))
 }
 
+/// A typed field or an untyped enum variant. Custom types may be either a
+/// struct (all items typed) or an enum (all items untyped); used inside
+/// `type_def` to parse both forms uniformly and decide afterwards.
+enum FieldOrVariant<'a> {
+    Field(Field<'a>),
+    Variant(EnumVariant<'a>),
+}
+
+/// Parse a single member of a `type Name (...)` body — either `name: type`
+/// (a struct field) or `name` (an enum variant).
+fn field_or_variant<'a>(
+    input: &mut &'a [u8],
+) -> ModalResult<FieldOrVariant<'a>, InputError<&'a [u8]>> {
+    let comments = parse_preceding_comments(input)?;
+    let name = field_name(input)?;
+    let ty = opt(preceded((ws, literal(":"), ws), varlink_type)).parse_next(input)?;
+    Ok(match ty {
+        Some(ty) => FieldOrVariant::Field(Field::new_owned(name, ty, comments)),
+        None => FieldOrVariant::Variant(EnumVariant::new_owned(name, comments)),
+    })
+}
+
 /// Parse a type definition: type Name <definition>.
 fn type_def<'a>(input: &mut &'a [u8]) -> ModalResult<CustomType<'a>, InputError<&'a [u8]>> {
     let comments = parse_preceding_comments(input)?;
@@ -368,82 +348,37 @@ fn type_def<'a>(input: &mut &'a [u8]) -> ModalResult<CustomType<'a>, InputError<
     take_while(1.., |c: u8| c.is_ascii_whitespace()).parse_next(input)?;
     let name = type_name(input)?;
     ws(input)?;
-    literal("(").parse_next(input)?;
-    whitespace_only(input)?;
+
+    let items: Vec<FieldOrVariant<'a>> = delimited(
+        (literal("("), whitespace_only),
+        separated(0.., field_or_variant, field_separator),
+        (ws, literal(")")),
+    )
+    .parse_next(input)?;
 
     let mut fields = Vec::new();
-    let mut variants: Vec<EnumVariant<'a>> = Vec::new();
-    let mut has_typed_fields = false;
-    let mut has_untyped_fields = false;
-
-    // Handle empty field list
-    if literal::<_, _, InputError<&'a [u8]>>(")")
-        .parse_next(input)
-        .is_ok()
-    {
-        return Ok(CustomType::from(CustomObject::new_owned(
-            name, fields, comments,
-        )));
-    }
-
-    // Parse fields with any preceding comments
-    loop {
-        // Parse any preceding comments for this field
-        let field_comments = parse_preceding_comments(input)?;
-
-        // Parse the field itself
-        let field_name = field_name(input)?;
-        whitespace_only(input)?;
-
-        // Try to parse the colon and type
-        if literal::<_, _, InputError<&'a [u8]>>(":")
-            .parse_next(input)
-            .is_ok()
-        {
-            whitespace_only(input)?;
-            let ty = varlink_type(input)?;
-            fields.push(Field::new_owned(field_name, ty, field_comments));
-            has_typed_fields = true;
-        } else {
-            // This is an enum-like field without type - collect as variant with comments
-            variants.push(EnumVariant::new_owned(field_name, field_comments));
-            has_untyped_fields = true;
-        }
-
-        whitespace_only(input)?;
-
-        // Check for comma (more fields) or closing paren (end)
-        if literal::<_, _, InputError<&'a [u8]>>(",")
-            .parse_next(input)
-            .is_ok()
-        {
-            whitespace_only(input)?;
-            // Continue to next field
-        } else if literal::<_, _, InputError<&'a [u8]>>(")")
-            .parse_next(input)
-            .is_ok()
-        {
-            // End of field list
-            break;
-        } else {
-            return Err(ErrMode::Backtrack(ParserError::from_input(input)));
+    let mut variants = Vec::new();
+    for item in items {
+        match item {
+            FieldOrVariant::Field(f) => fields.push(f),
+            FieldOrVariant::Variant(v) => variants.push(v),
         }
     }
 
-    // Error if we have both typed and untyped fields (mixed custom type)
-    if has_typed_fields && has_untyped_fields {
+    // A custom type cannot mix typed fields and untyped variants.
+    if !fields.is_empty() && !variants.is_empty() {
         return Err(ErrMode::Backtrack(ParserError::from_input(input)));
     }
 
-    // Decide whether to create an enum or object based on whether we saw typed fields
-    if has_typed_fields {
-        Ok(CustomType::from(CustomObject::new_owned(
-            name, fields, comments,
-        )))
-    } else {
-        // All fields were untyped, so this is an enum
+    // An empty body is a struct per the Varlink grammar; otherwise, untyped
+    // members make an enum and typed members make a struct.
+    if !variants.is_empty() {
         Ok(CustomType::from(CustomEnum::new_owned(
             name, variants, comments,
+        )))
+    } else {
+        Ok(CustomType::from(CustomObject::new_owned(
+            name, fields, comments,
         )))
     }
 }
