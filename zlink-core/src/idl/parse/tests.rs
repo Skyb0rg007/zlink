@@ -93,6 +93,42 @@ fn parse_inline_struct() {
 }
 
 #[test]
+fn parse_inline_empty_struct() {
+    // Empty `()` must be parsed as a (empty) struct per the Varlink grammar.
+    // An empty enum cannot be instantiated, so the grammar reserves `()` for
+    // structs.
+    match parse_type("()").unwrap() {
+        Type::Object(fields) => {
+            assert_eq!(fields.iter().count(), 0);
+        }
+        other => panic!("Expected empty struct, got: {other:?}"),
+    }
+
+    // Whitespace-only and comment-only content is also empty per the
+    // grammar's `_` production.
+    assert!(matches!(parse_type("(   )").unwrap(), Type::Object(_)));
+    assert!(matches!(
+        parse_type("(# comment\n)").unwrap(),
+        Type::Object(_)
+    ));
+
+    // Also exercise the issue's reported context: an inline empty struct used
+    // as a field type within a custom type.
+    let custom_type = parse_custom_type("type T (x: ())").unwrap();
+    let object = custom_type
+        .as_object()
+        .expect("expected struct-like custom type");
+    let field = object.fields().next().expect("expected field x");
+    assert_eq!(field.name(), "x");
+    match field.ty() {
+        Type::Object(fields) => {
+            assert_eq!(fields.iter().count(), 0);
+        }
+        other => panic!("Expected x to be an empty struct, got: {other:?}"),
+    }
+}
+
+#[test]
 fn parse_whitespace() {
     // Test that whitespace is handled correctly
     assert_eq!(parse_type("  bool  ").unwrap(), Type::Bool);

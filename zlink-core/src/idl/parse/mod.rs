@@ -165,19 +165,14 @@ fn enum_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [
 }
 
 /// Parse an inline type (struct or enum).
-/// Determines if it's a struct by looking for ':' character.
+///
+/// `struct_type` is tried first: it accepts `()` (and any whitespace- or
+/// comment-only body) as an empty struct, per the Varlink grammar
+/// (`struct = "(" struct_fields ")" | "(" ")"` — an empty enum cannot be
+/// instantiated). Content with `:` matches `struct_type`; bare-name
+/// content falls through to `enum_type` via `alt`'s backtracking.
 fn inline_type<'a>(input: &mut &'a [u8]) -> ModalResult<Type<'a>, InputError<&'a [u8]>> {
-    // Look ahead to see if this contains a colon (indicating struct)
-    if let Some(pos) = input.iter().position(|&b| b == b')') {
-        let content = &input[1..pos]; // Skip opening paren
-        if content.contains(&b':') {
-            struct_type(input)
-        } else {
-            enum_type(input)
-        }
-    } else {
-        Err(ErrMode::Backtrack(ParserError::from_input(input)))
-    }
+    alt((struct_type, enum_type)).parse_next(input)
 }
 
 /// Parse an element type (primitive, custom, or inline).
