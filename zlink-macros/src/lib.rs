@@ -1122,6 +1122,55 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// Methods with connection parameters are only callable through the `Service` trait (not directly
 /// on the type), since they require the socket type to be known.
 ///
+/// # Streaming Methods
+///
+/// Methods that send multiple replies (the Varlink `more` flag) are marked with `#[zlink(more)]`.
+/// Such a method must:
+///
+/// - Take `more: bool` as the first parameter after `self`. This receives the value of the call's
+///   `more` flag, allowing the method to behave differently when the client only wants a single
+///   reply.
+/// - Return `impl Stream<Item = Reply<T>>` (or `impl Stream<Item = (Reply<T>, Vec<OwnedFd>)>`
+///   when combined with `#[zlink(return_fds)]`). A concrete stream type is also accepted; in that
+///   case the macro infers `Reply<T>` from the type's first generic parameter.
+/// - Set `Reply::set_continues(Some(true))` on every intermediate item and `Some(false)` on the
+///   final one so that the client knows when the stream ends.
+///
+/// Streaming methods cannot return `Result<T, E>`: every stream item is a `Reply<T>`, so errors
+/// cannot be reported as stream items via this macro.
+///
+/// ## Example
+///
+/// ```rust
+/// use futures_util::Stream;
+/// use serde::{Deserialize, Serialize};
+/// use zlink::{introspect::Type, service, Reply};
+///
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+/// struct Tick {
+///     value: u32,
+/// }
+///
+/// struct Counter;
+///
+/// #[service(interface = "org.example.counter")]
+/// impl Counter {
+///     // Streams `Tick` values from 1 to `to`. If the caller did not set the `more` flag, only a
+///     // single tick is emitted.
+///     #[zlink(more)]
+///     async fn count(
+///         &self,
+///         more: bool,
+///         to: u32,
+///     ) -> impl Stream<Item = Reply<Tick>> + Unpin {
+///         let to = if more { to.max(1) } else { 1 };
+///         futures_util::stream::iter((1..=to).map(move |value| {
+///             Reply::new(Some(Tick { value })).set_continues(Some(value < to))
+///         }))
+///     }
+/// }
+/// ```
+///
 /// # Example
 ///
 /// ```rust
