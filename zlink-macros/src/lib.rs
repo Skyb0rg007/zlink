@@ -1130,9 +1130,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// - Take `more: bool` as the first parameter after `self`. This receives the value of the call's
 ///   `more` flag, allowing the method to behave differently when the client only wants a single
 ///   reply.
-/// - Return `impl Stream<Item = Reply<T>>` (or `impl Stream<Item = (Reply<T>, Vec<OwnedFd>)>`
-///   when combined with `#[zlink(return_fds)]`). A concrete stream type is also accepted; in that
-///   case the macro infers `Reply<T>` from the type's first generic parameter.
+/// - Return `impl Stream<Item = Reply<T>>` (or `impl Stream<Item = (Reply<T>, Vec<OwnedFd>)>` when
+///   combined with `#[zlink(return_fds)]`). A concrete stream type is also accepted; in that case
+///   the macro infers `Reply<T>` from the type's first generic parameter.
 /// - Set `Reply::set_continues(Some(true))` on every intermediate item and `Some(false)` on the
 ///   final one so that the client knows when the stream ends.
 ///
