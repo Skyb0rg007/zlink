@@ -1136,8 +1136,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// - Set `Reply::set_continues(Some(true))` on every intermediate item and `Some(false)` on the
 ///   final one so that the client knows when the stream ends.
 ///
-/// Streaming methods cannot return `Result<T, E>`: every stream item is a `Reply<T>`, so errors
-/// cannot be reported as stream items via this macro.
+/// Streaming methods cannot currently return `Result<T, E>`: every stream item is a `Reply<T>`,
+/// so errors cannot be reported as stream items via this macro yet. This is a temporary limitation
+/// that will be lifted in a future release.
 ///
 /// ## Example
 ///
