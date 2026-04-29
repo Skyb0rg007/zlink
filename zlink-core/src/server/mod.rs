@@ -2,6 +2,8 @@ pub(crate) mod listener;
 mod select_all;
 pub mod service;
 
+mod infallible;
+
 use alloc::vec::Vec;
 use futures_util::{FutureExt, StreamExt};
 use select_all::SelectAll;
