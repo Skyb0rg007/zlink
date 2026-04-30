@@ -109,7 +109,7 @@ pub(super) fn generate_service_impl(
         &interfaces,
         crate_path,
         &type_name,
-    );
+    )?;
 
     // Generate the ReplyStreamParams enum for streaming methods.
     let (reply_stream_params_enum, stream_item_type_map) =
@@ -907,7 +907,7 @@ fn generate_interface_descriptions(
     interfaces: &[String],
     crate_path: &TokenStream,
     type_name: &str,
-) -> TokenStream {
+) -> Result<TokenStream, Error> {
     let mut descriptions: Vec<TokenStream> = Vec::new();
 
     for interface in interfaces {
@@ -963,19 +963,52 @@ fn generate_interface_descriptions(
                     }
                 };
 
-                quote! {
+                let out_params_const = if method.is_streaming {
+                    method.stream_item_type.clone()
+                } else {
+                    method.return_type.clone()
+                }
+                .map(|ty| {
+                    if service_attrs.custom_types.contains(&ty) {
+                        quote! {
+                            const __OUT_PARAMS: &[&#crate_path::idl::Parameter<'static>] =
+                                <#ty as #crate_path::introspect::CustomType>::CUSTOM_TYPE
+                                    .as_object()
+                                    .expect("Return type has to be an object")
+                                    .fields_as_slice()
+                                    .unwrap();
+                        }
+                    } else {
+                        quote! {
+                            const __OUT_PARAMS: &[&#crate_path::idl::Parameter<'static>] =
+                                <#ty as #crate_path::introspect::Type>::TYPE
+                                    .as_object()
+                                    .expect("Return type has to be an object")
+                                    .as_borrowed()
+                                    .unwrap();
+                        }
+                    }
+                })
+                .unwrap_or_else(|| {
+                    quote! {
+                        const __OUT_PARAMS: &[&#crate_path::idl::Parameter<'static>] = &[];
+                    }
+                });
+
+                Ok(quote! {
                     const #method_const_name: &#crate_path::idl::Method<'static> = &{
                         #in_params_const
+                        #out_params_const
                         #crate_path::idl::Method::new(
                             #method_name,
                             __IN_PARAMS,
-                            &[],
+                            __OUT_PARAMS,
                             &[],
                         )
                     };
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
         // Generate the list of method references.
         let method_refs: Vec<TokenStream> = (0..interface_methods.len())
@@ -1045,7 +1078,7 @@ fn generate_interface_descriptions(
         });
     }
 
-    quote! { #(#descriptions)* }
+    Ok(quote! { #(#descriptions)* })
 }
 
 /// Wrap a `MethodReply` expression into a `HandleResult` with no file descriptors.

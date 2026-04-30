@@ -538,7 +538,7 @@ fn extract_result_types(ty: &Type) -> Option<(Option<Type>, Type)> {
 ///
 /// For `impl Stream<Item = Reply<T>>`, returns `Reply<T>`.
 /// For concrete types like `SomeStream<T>`, returns `Reply<T>` (assuming the generic param is T).
-fn extract_stream_item_type(ty: &Type) -> Option<Type> {
+pub(super) fn extract_stream_item_type(ty: &Type) -> Option<Type> {
     match ty {
         // Handle `impl Stream<Item = T> + ...` (impl trait syntax).
         Type::ImplTrait(impl_trait) => {
@@ -611,7 +611,7 @@ fn extract_stream_item_from_trait_bound(trait_bound: &syn::TraitBound) -> Option
 ///
 /// Returns `Some((T, None))` for `Reply<T>`, `Some((T, Some(E)))` for `Result<Reply<T>, E>`,
 /// and `None` if the type matches neither shape.
-fn extract_reply_or_result_reply(ty: &Type) -> Option<(Type, Option<Type>)> {
+pub(super) fn extract_reply_or_result_reply(ty: &Type) -> Option<(Type, Option<Type>)> {
     if let Some(inner) = extract_reply_inner_type(ty) {
         return Some((inner, None));
     }
@@ -664,7 +664,7 @@ fn is_unit_type(ty: &Type) -> bool {
 
 /// Extract the first element type from a tuple type `(T, ...)`.
 /// Returns `None` if the type is not a tuple with at least one element.
-fn extract_first_tuple_element(ty: &Type) -> Option<Type> {
+pub(super) fn extract_first_tuple_element(ty: &Type) -> Option<Type> {
     let Type::Tuple(tuple) = ty else {
         return None;
     };
