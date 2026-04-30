@@ -53,7 +53,7 @@ struct CredentialCheckingService {
 // Service implementation with custom socket bounds using user-provided generics.
 // The first type parameter (Sock) is used as the socket type. The Socket bound is added
 // automatically, so we only specify additional bounds.
-#[zlink::service]
+#[zlink::service(types = [Balance])]
 impl<Sock> CredentialCheckingService
 where
     Sock::ReadHalf: FetchPeerCredentials,

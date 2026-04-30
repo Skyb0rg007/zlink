@@ -4,6 +4,7 @@ use super::fd_passing::{FdError, FdHandle};
 use serde::{Deserialize, Serialize};
 use zlink::{
     Server,
+    introspect::Type,
     unix::{bind, connect},
 };
 
@@ -111,7 +112,7 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
 }
 
 /// Response for streaming FD read operations.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 struct FdReadResult {
     fd_index: u32,
     content: String,

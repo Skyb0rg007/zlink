@@ -46,7 +46,7 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
     let fds = vec![r0.into(), r1.into(), r2.into()];
     // Read from index 1.
     let data = conn.read_fd(1, fds).await?.unwrap();
-    assert_eq!(data, "data-one");
+    assert_eq!(data.contents, "data-one");
 
     // Invalid index returns an error.
     let (r, mut w) = UnixStream::pair()?;
@@ -58,7 +58,7 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
     // Receive FDs from the service. Each handle has a name and fd_index referencing the FD vector.
     let names = vec!["config.txt".into(), "data.bin".into(), "log.txt".into()];
     let (result, fds) = conn.open_fds(names).await?;
-    let handles = result.unwrap();
+    let handles = result.unwrap().handles;
     assert_eq!(handles.len(), 3);
     assert_eq!(fds.len(), 3);
     // Verify each handle's name and that the FD at fd_index contains the name as content.
@@ -73,7 +73,7 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
 
     // Receive zero FDs from the service.
     let (result, fds) = conn.open_fds(Vec::new()).await?;
-    let handles = result.unwrap();
+    let handles = result.unwrap().handles;
     assert!(handles.is_empty());
     assert!(fds.is_empty());
 
@@ -102,10 +102,22 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
 }
 
 // Response type for FD operations. The `fd_index` field references a position in the FD vector.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, introspect::Type)]
 pub(crate) struct FdHandle {
     pub name: String,
     pub fd_index: u32,
+}
+
+// Response type for FD operations returning multiple handles.
+#[derive(Debug, Clone, Serialize, Deserialize, introspect::Type)]
+pub(crate) struct Handles {
+    pub handles: Vec<FdHandle>,
+}
+
+// Response type for read operations
+#[derive(Debug, Clone, Serialize, Deserialize, introspect::Type)]
+pub(crate) struct Contents {
+    pub contents: String,
 }
 
 // Error type for FD operations.
@@ -126,7 +138,7 @@ impl FdService {
         &self,
         fd_index: u32,
         #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
-    ) -> Result<String, FdError> {
+    ) -> Result<Contents, FdError> {
         use std::{io::Read, os::unix::net::UnixStream};
 
         let Some(fd) = fds.into_iter().nth(fd_index as usize) else {
@@ -135,12 +147,12 @@ impl FdService {
         let mut stream = UnixStream::from(fd);
         let mut buf = String::new();
         stream.read_to_string(&mut buf).unwrap();
-        Ok(buf)
+        Ok(Contents { contents: buf })
     }
 
     /// Open a list of named FDs and return handles with their indexes.
     #[zlink(return_fds)]
-    async fn open_fds(&self, names: Vec<String>) -> (Vec<FdHandle>, Vec<std::os::fd::OwnedFd>) {
+    async fn open_fds(&self, names: Vec<String>) -> (Handles, Vec<std::os::fd::OwnedFd>) {
         use std::{io::Write, os::unix::net::UnixStream};
 
         let mut handles = Vec::new();
@@ -156,7 +168,7 @@ impl FdService {
             });
             fds.push(r.into());
         }
-        (handles, fds)
+        (Handles { handles }, fds)
     }
 
     /// Try to open an FD. On success, return the handle with its index. On error, return the
@@ -195,13 +207,13 @@ trait FdProxy {
         &mut self,
         fd_index: u32,
         #[zlink(fds)] fds: Vec<std::os::fd::OwnedFd>,
-    ) -> zlink::Result<Result<String, FdError>>;
+    ) -> zlink::Result<Result<Contents, FdError>>;
 
     #[zlink(return_fds)]
     async fn open_fds(
         &mut self,
         names: Vec<String>,
-    ) -> zlink::Result<(Result<Vec<FdHandle>, FdError>, Vec<std::os::fd::OwnedFd>)>;
+    ) -> zlink::Result<(Result<Handles, FdError>, Vec<std::os::fd::OwnedFd>)>;
 
     #[zlink(return_fds)]
     async fn try_open_fd(
