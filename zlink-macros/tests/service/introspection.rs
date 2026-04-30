@@ -3,6 +3,7 @@
 use super::basic::{BankAccount, BankError};
 use zlink::{
     Server,
+    idl::Type,
     unix::{bind, connect},
 };
 
@@ -57,12 +58,40 @@ async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Verify the interface contains exactly the expected methods.
-    let method_names: Vec<_> = interface.methods().map(|m| m.name()).collect();
+    let methods: Vec<_> = interface.methods().collect();
+    let method_names: Vec<_> = methods.iter().map(|m| m.name()).collect();
     assert_eq!(
         method_names.as_slice(),
         ["GetBalance", "Deposit", "Withdraw", "LockAccount"],
         "Unexpected methods"
     );
+    for method in methods {
+        match method.name() {
+            "GetBalance" => {
+                assert!(method.has_no_inputs());
+                let output_names = method.outputs().map(|f| f.name()).collect::<Vec<_>>();
+                let output_types = method.outputs().map(|f| f.ty()).collect::<Vec<_>>();
+                assert_eq!(output_names.as_slice(), &["amount"]);
+                assert_eq!(output_types.as_slice(), &[&Type::Int]);
+            }
+            "Deposit" | "Withdraw" => {
+                let input_names = method.inputs().map(|f| f.name()).collect::<Vec<_>>();
+                let input_types = method.inputs().map(|f| f.ty()).collect::<Vec<_>>();
+                assert_eq!(input_names.as_slice(), &["amount"]);
+                assert_eq!(input_types.as_slice(), &[&Type::Int]);
+
+                let output_names = method.outputs().map(|f| f.name()).collect::<Vec<_>>();
+                let output_types = method.outputs().map(|f| f.ty()).collect::<Vec<_>>();
+                assert_eq!(output_names.as_slice(), &["amount"]);
+                assert_eq!(output_types.as_slice(), &[&Type::Int]);
+            }
+            "LockAccount" => {
+                assert!(method.has_no_inputs());
+                assert!(method.has_no_outputs());
+            }
+            x => panic!("Unknown method: {}", x),
+        }
+    }
 
     // Verify the interface contains exactly the expected errors.
     let error_names: Vec<_> = interface.errors().map(|e| e.name()).collect();
