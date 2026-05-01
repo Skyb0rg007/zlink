@@ -17,6 +17,9 @@ struct HandleBodyContext<'a> {
     reply_params_name: &'a Ident,
     reply_error_name: &'a Ident,
     reply_stream_params_name: &'a Ident,
+    /// The token stream for the resolved `ReplyStreamError` type (either the generated enum or
+    /// the [`Infallible`](crate::service::Infallible) sentinel).
+    reply_stream_error_ty: &'a TokenStream,
     reply_stream_name: &'a Ident,
     error_type_map: &'a HashMap<String, usize>,
     stream_item_type_map: &'a HashMap<String, Ident>,
@@ -69,6 +72,7 @@ pub(super) fn generate_service_impl(
     let reply_params_name = format_ident!("__{}ReplyParams", type_name);
     let reply_error_name = format_ident!("__{}ReplyError", type_name);
     let reply_stream_params_name = format_ident!("__{}ReplyStreamParams", type_name);
+    let reply_stream_error_name = format_ident!("__{}ReplyStreamError", type_name);
     let reply_stream_name = format_ident!("__{}ReplyStream", type_name);
 
     // Collect interfaces for introspection.
@@ -111,6 +115,15 @@ pub(super) fn generate_service_impl(
     let (reply_stream_params_enum, stream_item_type_map) =
         generate_reply_stream_params_enum(methods_info, &reply_stream_params_name);
 
+    // Generate the ReplyStreamError enum (only when at least one streaming method emits errors).
+    let (reply_stream_error_enum, stream_error_type_map) =
+        generate_reply_stream_error_enum(methods_info, &reply_stream_error_name);
+    let reply_stream_error_ty = if stream_error_type_map.is_empty() {
+        quote! { #crate_path::service::Infallible }
+    } else {
+        quote! { #reply_stream_error_name }
+    };
+
     // Check if any streaming method uses `impl Trait` (requires boxing).
     let needs_stream_boxing = methods_info
         .iter()
@@ -124,6 +137,7 @@ pub(super) fn generate_service_impl(
         reply_params_name: &reply_params_name,
         reply_error_name: &reply_error_name,
         reply_stream_params_name: &reply_stream_params_name,
+        reply_stream_error_ty: &reply_stream_error_ty,
         reply_stream_name: &reply_stream_name,
         error_type_map: &error_type_map,
         stream_item_type_map: &stream_item_type_map,
@@ -168,9 +182,7 @@ pub(super) fn generate_service_impl(
     // Check for streaming methods and determine stream types.
     let has_streaming_methods = methods_info.iter().any(|m| m.is_streaming);
 
-    // Generate the ReplyStream type and enum (if using concrete types). Streaming methods
-    // currently always use `service::Infallible` as the error type — the macro doesn't yet detect
-    // `Stream<Item = Result<Reply<T>, E>>` shapes, so every item is mechanically wrapped in `Ok`.
+    // Generate the ReplyStream type and enum (if using concrete types).
     let (reply_stream_type, reply_stream_params_type, reply_stream_enum) = if has_streaming_methods
     {
         if needs_stream_boxing {
@@ -181,7 +193,7 @@ pub(super) fn generate_service_impl(
                         dyn #crate_path::futures_util::Stream<
                                 Item = #crate_path::service::ReplyStreamItem<
                                     #reply_stream_params_name,
-                                    #crate_path::service::Infallible,
+                                    #reply_stream_error_ty,
                                 >
                             > + ::core::marker::Unpin
                     >
@@ -195,6 +207,7 @@ pub(super) fn generate_service_impl(
                 methods_info,
                 &reply_stream_name,
                 &reply_stream_params_name,
+                &reply_stream_error_ty,
                 &stream_item_type_map,
                 crate_path,
             );
@@ -210,7 +223,10 @@ pub(super) fn generate_service_impl(
         (
             quote! {
                 #crate_path::futures_util::stream::Empty<
-                    #crate_path::service::ReplyStreamItem<(), #crate_path::service::Infallible>
+                    #crate_path::service::ReplyStreamItem<
+                        (),
+                        #crate_path::service::Infallible,
+                    >
                 >
             },
             quote! { () },
@@ -233,7 +249,7 @@ pub(super) fn generate_service_impl(
             type ReplyParams<'ser> = #reply_params_name<'ser> where Self: 'ser;
             type ReplyStream = #reply_stream_type;
             type ReplyStreamParams = #reply_stream_params_type;
-            type ReplyStreamError = #crate_path::service::Infallible;
+            type ReplyStreamError = #reply_stream_error_ty;
             type ReplyError<'ser> = #error_type where Self: 'ser;
 
             async fn handle<'__zlink_ser>(
@@ -259,6 +275,8 @@ pub(super) fn generate_service_impl(
         #reply_params_enum
 
         #reply_stream_params_enum
+
+        #reply_stream_error_enum
 
         #reply_stream_enum
 
@@ -411,6 +429,31 @@ fn build_error_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, 
     type_to_variant
 }
 
+/// Build a mapping from stream error type string representation to variant index.
+/// This ensures consistent variant naming for the stream error enum.
+fn build_stream_error_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, usize> {
+    let mut type_to_variant: HashMap<String, usize> = HashMap::new();
+    let mut variant_idx = 0;
+
+    for method in methods_info {
+        if !method.is_streaming {
+            continue;
+        }
+
+        let Some(ref err_type) = method.stream_error_type else {
+            continue;
+        };
+
+        let type_str = err_type.to_token_stream().to_string();
+        if let std::collections::hash_map::Entry::Vacant(e) = type_to_variant.entry(type_str) {
+            e.insert(variant_idx);
+            variant_idx += 1;
+        }
+    }
+
+    type_to_variant
+}
+
 /// Build a mapping from stream item type string representation to variant name.
 /// This ensures consistent variant naming for the stream params enum.
 fn build_stream_item_type_variant_map(methods_info: &[MethodInfo]) -> HashMap<String, Ident> {
@@ -507,6 +550,66 @@ fn generate_reply_error_enum(
     (enum_def, error_type_map)
 }
 
+/// Generate the ReplyStreamError enum for errors emitted as streaming method items.
+///
+/// Returns the (optional) enum definition and the type map. When no streaming method emits
+/// errors, the enum is omitted and `Infallible` is used as the associated type.
+fn generate_reply_stream_error_enum(
+    methods_info: &[MethodInfo],
+    enum_name: &Ident,
+) -> (TokenStream, HashMap<String, usize>) {
+    let type_map = build_stream_error_type_variant_map(methods_info);
+
+    if type_map.is_empty() {
+        return (quote! {}, type_map);
+    }
+
+    let mut type_variant_pairs: Vec<_> = type_map.iter().collect();
+    type_variant_pairs.sort_by_key(|(_, idx)| *idx);
+
+    let mut variants: Vec<TokenStream> = Vec::new();
+    let mut from_impls: Vec<TokenStream> = Vec::new();
+
+    for (type_str, idx) in type_variant_pairs {
+        for method in methods_info {
+            if !method.is_streaming {
+                continue;
+            }
+            let Some(ref err_type) = method.stream_error_type else {
+                continue;
+            };
+            if &err_type.to_token_stream().to_string() == type_str {
+                let variant_name = format_ident!("__{}Variant{}", enum_name, idx);
+                variants.push(quote! {
+                    #variant_name(#err_type)
+                });
+
+                from_impls.push(quote! {
+                    impl ::core::convert::From<#err_type> for #enum_name {
+                        fn from(e: #err_type) -> Self {
+                            #enum_name::#variant_name(e)
+                        }
+                    }
+                });
+                break;
+            }
+        }
+    }
+
+    let enum_def = quote! {
+        #[allow(private_interfaces)]
+        #[derive(::core::fmt::Debug, ::serde::Serialize)]
+        #[serde(untagged)]
+        pub enum #enum_name {
+            #(#variants,)*
+        }
+
+        #(#from_impls)*
+    };
+
+    (enum_def, type_map)
+}
+
 /// Generate the ReplyStreamParams enum for streaming method replies.
 /// Returns the enum definition, From impls, and the type map.
 fn generate_reply_stream_params_enum(
@@ -572,11 +675,82 @@ fn generate_reply_stream_params_enum(
 }
 
 /// Generate the ReplyStream enum for concrete stream types (using pin-project-lite).
+/// Build the body that maps `__r` (the user stream's item) into the trait's required
+/// `Result<Reply<ReplyStreamParams>, ReplyStreamError>` shape.
+///
+/// Used by both the boxed (`impl Trait`) and concrete-type stream wrappers.
+fn build_stream_map_body(
+    has_err: bool,
+    params_variant: &Ident,
+    reply_stream_params_name: &Ident,
+    reply_stream_error_ty: &TokenStream,
+    crate_path: &TokenStream,
+) -> TokenStream {
+    let result_ty = quote! {
+        ::core::result::Result::<
+            #crate_path::Reply<#reply_stream_params_name>,
+            #reply_stream_error_ty,
+        >
+    };
+    let wrap_ok = quote! {
+        #result_ty::Ok(__rep.map(|__p| #reply_stream_params_name::#params_variant(__p)))
+    };
+    if has_err {
+        quote! {
+            match __r {
+                ::core::result::Result::Ok(__rep) => { #wrap_ok }
+                ::core::result::Result::Err(__err) => {
+                    #result_ty::Err(::core::convert::Into::into(__err))
+                }
+            }
+        }
+    } else {
+        // Alias `__rep` so the `wrap_ok` template above is identical in both arms.
+        quote! { { let __rep = __r; #wrap_ok } }
+    }
+}
+
+/// Build the closure that adapts a stream item from the user's stream into the trait's stream
+/// item shape (`ReplyStreamItem<P, E>`).
+///
+/// On `std`:
+///   * `return_fds` → `|(__r, __fds)| (#map_body, __fds)`
+///   * otherwise    → `|__r| (#map_body, Vec::new())`
+///
+/// On `no_std`: `|__r| #map_body` (no FDs).
+fn build_stream_item_map_closure(map_body: &TokenStream, return_fds: bool) -> TokenStream {
+    #[cfg(feature = "std")]
+    {
+        let fds_expr = if return_fds {
+            quote! { __fds }
+        } else {
+            quote! { ::std::vec::Vec::new() }
+        };
+        let arg_pat = if return_fds {
+            quote! { (__r, __fds) }
+        } else {
+            quote! { __r }
+        };
+        quote! {
+            |#arg_pat| {
+                let __mapped = #map_body;
+                (__mapped, #fds_expr)
+            }
+        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = return_fds;
+        quote! { |__r| { #map_body } }
+    }
+}
+
 /// This avoids boxing when all streaming methods return concrete types.
 fn generate_reply_stream_enum(
     methods_info: &[MethodInfo],
     enum_name: &Ident,
     reply_stream_params_name: &Ident,
+    reply_stream_error_ty: &TokenStream,
     stream_item_type_map: &HashMap<String, Ident>,
     crate_path: &TokenStream,
 ) -> TokenStream {
@@ -604,10 +778,14 @@ fn generate_reply_stream_enum(
         })
         .collect();
 
-    // Generate poll_next match arms.
-    // On std, stream items are (Reply<T>, Vec<OwnedFd>) tuples.
-    // On no_std, stream items are just Reply<T>.
-    #[cfg(feature = "std")]
+    // Generate poll_next match arms. The user method's stream might yield:
+    //   * `Reply<T>`                                       — wrap in `Ok(...)`
+    //   * `Result<Reply<T>, E>`                             — convert error via `Into`
+    //   * `(Reply<T>, Vec<OwnedFd>)`        (return_fds)    — wrap in `Ok(...)` (with FDs)
+    //   * `(Result<Reply<T>, E>, Vec<OwnedFd>)` (return_fds + error)
+    //
+    // The trait's stream item shape is built by `build_stream_map_body` /
+    // `build_stream_item_map_closure`.
     let poll_arms: Vec<TokenStream> = streaming_methods
         .iter()
         .map(|method| {
@@ -618,53 +796,17 @@ fn generate_reply_stream_enum(
                 .get(&type_str)
                 .cloned()
                 .unwrap_or_else(|| format_ident!("__Unknown"));
-
-            if method.return_fds {
-                // Method's stream yields (Reply<T>, Vec<OwnedFd>).
-                quote! {
-                    #projection_name::#variant_name { stream } => {
-                        stream.poll_next(cx).map(|opt| opt.map(|(reply, fds)| {
-                            let mapped_reply = reply.map(|params| {
-                                #reply_stream_params_name::#params_variant(params)
-                            });
-                            (::core::result::Result::Ok(mapped_reply), fds)
-                        }))
-                    }
-                }
-            } else {
-                // Method's stream yields Reply<T>, wrap with empty FDs.
-                quote! {
-                    #projection_name::#variant_name { stream } => {
-                        stream.poll_next(cx).map(|opt| opt.map(|reply| {
-                            let mapped_reply = reply.map(|params| {
-                                #reply_stream_params_name::#params_variant(params)
-                            });
-                            (::core::result::Result::Ok(mapped_reply), ::std::vec::Vec::new())
-                        }))
-                    }
-                }
-            }
-        })
-        .collect();
-    #[cfg(not(feature = "std"))]
-    let poll_arms: Vec<TokenStream> = streaming_methods
-        .iter()
-        .map(|method| {
-            let variant_name = format_ident!("{}", method.varlink_name);
-            let item_type = method.stream_item_type.as_ref().unwrap();
-            let type_str = item_type.to_token_stream().to_string();
-            let params_variant = stream_item_type_map
-                .get(&type_str)
-                .cloned()
-                .unwrap_or_else(|| format_ident!("__Unknown"));
-
+            let map_body = build_stream_map_body(
+                method.stream_error_type.is_some(),
+                &params_variant,
+                reply_stream_params_name,
+                reply_stream_error_ty,
+                crate_path,
+            );
+            let item_map = build_stream_item_map_closure(&map_body, method.return_fds);
             quote! {
                 #projection_name::#variant_name { stream } => {
-                    stream.poll_next(cx).map(|opt| opt.map(|reply| {
-                        ::core::result::Result::Ok(
-                            reply.map(|params| #reply_stream_params_name::#params_variant(params)),
-                        )
-                    }))
+                    stream.poll_next(cx).map(|__opt| __opt.map(#item_map))
                 }
             }
         })
@@ -682,7 +824,7 @@ fn generate_reply_stream_enum(
         impl #crate_path::futures_util::Stream for #enum_name {
             type Item = #crate_path::service::ReplyStreamItem<
                 #reply_stream_params_name,
-                #crate_path::service::Infallible,
+                #reply_stream_error_ty,
             >;
 
             fn poll_next(
@@ -854,12 +996,18 @@ fn generate_interface_descriptions(
             })
             .collect();
 
-        // Collect error types for this interface (deduplicate using string representation).
+        // Collect error types for this interface, including those raised by streaming method
+        // items. Deduplicate using string representation.
         let mut seen_error_types = HashSet::new();
         let error_types: Vec<TokenStream> = methods_info
             .iter()
             .filter(|m| m.interface.as_ref() == Some(interface))
-            .filter_map(|m| m.error_type.as_ref())
+            .flat_map(|m| {
+                m.error_type
+                    .as_ref()
+                    .into_iter()
+                    .chain(m.stream_error_type.as_ref())
+            })
             .filter(|err_ty| {
                 let type_str = err_ty.to_token_stream().to_string();
                 seen_error_types.insert(type_str)
@@ -953,6 +1101,7 @@ fn generate_handle_body(
         reply_params_name,
         reply_error_name,
         reply_stream_params_name,
+        reply_stream_error_ty,
         reply_stream_name,
         error_type_map,
         stream_item_type_map,
@@ -1088,73 +1237,29 @@ fn generate_handle_body(
 
             let streaming_reply = if *needs_stream_boxing {
                 // Use boxing when any streaming method uses `impl Trait`.
-                #[cfg(feature = "std")]
-                let boxed_stream = if method.return_fds {
-                    // Method's stream yields (Reply<T>, Vec<OwnedFd>).
-                    quote! {
-                        let __stream = #method_call;
-                        let __mapped = #crate_path::futures_util::StreamExt::map(
-                            __stream,
-                            |(__reply, __fds)| {
-                                let __mapped_reply = __reply.map(|__params| {
-                                    #reply_stream_params_name::#stream_variant_name(__params)
-                                });
-                                (::core::result::Result::Ok(__mapped_reply), __fds)
-                            },
-                        );
-                        let __boxed: ::std::boxed::Box<
-                            dyn #crate_path::futures_util::Stream<
-                                    Item = #crate_path::service::ReplyStreamItem<
-                                        #reply_stream_params_name,
-                                        #crate_path::service::Infallible,
-                                    >
-                                > + ::core::marker::Unpin
-                        > = ::std::boxed::Box::new(__mapped);
-                        #crate_path::service::MethodReply::Multi(__boxed)
-                    }
-                } else {
-                    // Method's stream yields Reply<T>, wrap with empty FDs.
-                    quote! {
-                        let __stream = #method_call;
-                        let __mapped = #crate_path::futures_util::StreamExt::map(__stream, |__reply| {
-                            let __mapped_reply = __reply.map(|__params| {
-                                #reply_stream_params_name::#stream_variant_name(__params)
-                            });
-                            (
-                                ::core::result::Result::Ok(__mapped_reply),
-                                ::std::vec::Vec::new(),
-                            )
-                        });
-                        let __boxed: ::std::boxed::Box<
-                            dyn #crate_path::futures_util::Stream<
-                                    Item = #crate_path::service::ReplyStreamItem<
-                                        #reply_stream_params_name,
-                                        #crate_path::service::Infallible,
-                                    >
-                                > + ::core::marker::Unpin
-                        > = ::std::boxed::Box::new(__mapped);
-                        #crate_path::service::MethodReply::Multi(__boxed)
-                    }
-                };
-                #[cfg(not(feature = "std"))]
-                let boxed_stream = quote! {
+                let map_body = build_stream_map_body(
+                    method.stream_error_type.is_some(),
+                    &stream_variant_name,
+                    reply_stream_params_name,
+                    reply_stream_error_ty,
+                    crate_path,
+                );
+                let item_map = build_stream_item_map_closure(&map_body, method.return_fds);
+
+                quote! {
                     let __stream = #method_call;
-                    let __mapped = #crate_path::futures_util::StreamExt::map(__stream, |__reply| {
-                        ::core::result::Result::Ok(__reply.map(|__params| {
-                            #reply_stream_params_name::#stream_variant_name(__params)
-                        }))
-                    });
+                    let __mapped =
+                        #crate_path::futures_util::StreamExt::map(__stream, #item_map);
                     let __boxed: ::std::boxed::Box<
                         dyn #crate_path::futures_util::Stream<
                                 Item = #crate_path::service::ReplyStreamItem<
                                     #reply_stream_params_name,
-                                    #crate_path::service::Infallible,
+                                    #reply_stream_error_ty,
                                 >
                             > + ::core::marker::Unpin
                     > = ::std::boxed::Box::new(__mapped);
                     #crate_path::service::MethodReply::Multi(__boxed)
-                };
-                boxed_stream
+                }
             } else {
                 // Use enum variant when all streaming methods return concrete types.
                 quote! {
