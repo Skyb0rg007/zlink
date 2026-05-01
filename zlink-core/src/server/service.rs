@@ -5,20 +5,32 @@ use core::{fmt::Debug, future::Future};
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 
+pub use super::infallible::Infallible;
 use crate::{Call, Connection, Reply, connection::Socket};
 
 /// The item type that a [`Service::ReplyStream`] yields.
 ///
-/// On `std`, this is a tuple of the reply and the file descriptors to send with it. On `no_std`,
-/// this is just the reply.
+/// Each item is either an [`Ok`] success [`Reply`] or an [`Err`] error reply. Services whose
+/// streaming methods never fail should set [`Service::ReplyStreamError`] to [`Infallible`], in
+/// which case the `Err` arm is statically unreachable.
+///
+/// On `std`, the alias additionally pairs the result with the file descriptors to send. On
+/// `no_std`, it is just the result.
 #[cfg(feature = "std")]
-pub type ReplyStreamItem<Params> = (Reply<Params>, Vec<std::os::fd::OwnedFd>);
+pub type ReplyStreamItem<Params, Error> = (
+    core::result::Result<Reply<Params>, Error>,
+    Vec<std::os::fd::OwnedFd>,
+);
 /// The item type that a [`Service::ReplyStream`] yields.
 ///
-/// On `std`, this is a tuple of the reply and the file descriptors to send with it. On `no_std`,
-/// this is just the reply.
+/// Each item is either an [`Ok`] success [`Reply`] or an [`Err`] error reply. Services whose
+/// streaming methods never fail should set [`Service::ReplyStreamError`] to [`Infallible`], in
+/// which case the `Err` arm is statically unreachable.
+///
+/// On `std`, the alias additionally pairs the result with the file descriptors to send. On
+/// `no_std`, it is just the result.
 #[cfg(not(feature = "std"))]
-pub type ReplyStreamItem<Params> = Reply<Params>;
+pub type ReplyStreamItem<Params, Error> = core::result::Result<Reply<Params>, Error>;
 
 /// Service trait for handling method calls.
 ///
@@ -50,16 +62,26 @@ where
     ///
     /// This should be a type that can serialize itself as the `parameters` field of the reply.
     type ReplyStreamParams: Serialize + Debug;
+    /// The type of an error reply produced by a streaming method.
+    ///
+    /// Unlike [`Self::ReplyError`], this type cannot borrow from `&self` (the stream outlives the
+    /// `handle` call). Services whose streaming methods never fail should set this to
+    /// [`Infallible`] — the `Err` arm of [`ReplyStreamItem`] then becomes statically unreachable.
+    type ReplyStreamError: Serialize + Debug;
     /// The type of the multi-reply stream.
     ///
-    /// If the client asks for multiple replies, this stream will be used to send them.
-    type ReplyStream: Stream<Item = ReplyStreamItem<Self::ReplyStreamParams>> + Unpin;
+    /// If the client asks for multiple replies, this stream will be used to send them. Each
+    /// stream item is either a success [`Reply`] or an error of type [`Self::ReplyStreamError`].
+    type ReplyStream: Stream<Item = ReplyStreamItem<Self::ReplyStreamParams, Self::ReplyStreamError>>
+        + Unpin;
     /// The type of the error reply.
     ///
     /// This should be a type that can serialize itself to the whole reply object, containing
     /// `error` and `parameter` fields. This can be easily achieved using the `serde::Serialize`
     /// derive (See the code snippet in [`crate::connection::ReadConnection::receive_reply`]
     /// documentation for an example).
+    ///
+    /// Services whose methods never fail can use [`Infallible`] for this type as well.
     type ReplyError<'ser>: Serialize + Debug
     where
         Self: 'ser;

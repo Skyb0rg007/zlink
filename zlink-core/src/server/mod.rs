@@ -2,6 +2,8 @@ pub(crate) mod listener;
 mod select_all;
 pub mod service;
 
+mod infallible;
+
 use alloc::vec::Vec;
 use futures_util::{FutureExt, StreamExt};
 use select_all::SelectAll;
@@ -153,15 +155,23 @@ where
                     match item {
                         Some(item) => {
                             #[cfg(feature = "std")]
-                            let (reply, fds) = item;
-                            #[cfg(not(feature = "std"))]
-                            let reply = item;
-
+                            let (item, fds) = item;
                             #[cfg(feature = "std")]
-                            let send_result =
-                                reply_streams[idx].conn.send_reply(&reply, fds).await;
+                            let send_result = match item {
+                                Ok(reply) => reply_streams[idx]
+                                    .conn
+                                    .send_reply(&reply, fds)
+                                    .await,
+                                Err(error) => reply_streams[idx]
+                                    .conn
+                                    .send_error(&error, fds)
+                                    .await,
+                            };
                             #[cfg(not(feature = "std"))]
-                            let send_result = reply_streams[idx].conn.send_reply(&reply).await;
+                            let send_result = match item {
+                                Ok(reply) => reply_streams[idx].conn.send_reply(&reply).await,
+                                Err(error) => reply_streams[idx].conn.send_error(&error).await,
+                            };
                             if let Err(e) = send_result {
                                 warn!("Error writing to client {}: {:?}", id, e);
                                 reply_streams.swap_remove(idx);
