@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0 - 2026-05-03
+
+### Added
+- ✨ Detect `Result<Reply<T>, E>` items in streaming methods.
+- ✨ Allow fallible reply streams in `Service`.
+
+### Changed
+- 🎨 Apply nightly rustfmt to streaming docs.
+
+### Documentation
+- 📝 Document streaming-method error replies on `service`.
+- 📝 Frame streaming-error gap as a temporary limitation.
+- 📝 Document streaming `more` methods on `service` macro.
+
+### Fixed
+- 🚑️ generate service method out params.
+- 🐛 Make sure methods return objects in tests.
+
+### Testing
+- ✅ Test method in/out params in introspection.
+- ✅ Round-trip test for streaming method errors.
+
 ## 0.4.2 - 2026-04-26
 
 ### Documentation
