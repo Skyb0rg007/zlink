@@ -54,6 +54,11 @@ impl<'a> CustomObject<'a> {
         self.fields.iter()
     }
 
+    /// The fields as a slice.
+    pub const fn fields_as_slice(&self) -> Option<&[&Field<'a>]> {
+        self.fields.as_borrowed()
+    }
+
     /// Returns an iterator over the comments associated with this object type.
     pub fn comments(&self) -> impl Iterator<Item = &super::Comment<'a>> {
         self.comments.iter()

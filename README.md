@@ -125,12 +125,12 @@ trait CalculatorProxy {
 }
 
 // Types shared between client and server.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, introspect::Type)]
 struct CalculationResult {
     result: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, introspect::Type)]
 struct Statistics<'a> {
     count: u64,
     #[serde(borrow)]

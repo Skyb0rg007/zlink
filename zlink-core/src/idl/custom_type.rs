@@ -36,7 +36,7 @@ impl<'a> CustomType<'a> {
     }
 
     /// Returns the object if this is an object custom type.
-    pub fn as_object(&self) -> Option<&CustomObject<'a>> {
+    pub const fn as_object(&self) -> Option<&CustomObject<'a>> {
         match self {
             CustomType::Object(obj) => Some(obj),
             CustomType::Enum(_) => None,

@@ -27,6 +27,7 @@ syn = { version = "2.0", default-features = false, features = [
     "parsing",
     "printing",
     "proc-macro",
+    "extra-traits"
 ] }
 
 [dev-dependencies]
