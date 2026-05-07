@@ -1504,7 +1504,6 @@ dependencies = [
 name = "test-integration"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "serde",
  "serde_json",
  "tokio",
@@ -2159,7 +2158,6 @@ dependencies = [
 name = "zlink-codegen"
 version = "0.5.0"
 dependencies = [
- "anyhow",
  "clap",
  "heck",
  "pretty_assertions",

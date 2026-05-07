@@ -1,8 +1,9 @@
 //! Code generation implementation.
 
-use anyhow::Result;
 use heck::{ToPascalCase, ToSnakeCase};
 use std::fmt::Write;
+
+type Result<T = ()> = std::result::Result<T, std::fmt::Error>;
 use zlink::idl::{CustomEnum, CustomObject, CustomType, Field, Interface, Method, Type};
 
 /// Code generator for Varlink interfaces.
