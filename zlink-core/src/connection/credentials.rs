@@ -16,11 +16,6 @@ pub struct Credentials {
 
 impl Credentials {
     /// Create new credentials for a peer connection.
-    ///
-    /// # Arguments
-    /// * `unix_user_id` - The numeric Unix user ID.
-    /// * `process_id` - The numeric process ID.
-    /// * `process_fd` (Linux only) - A file descriptor pinning the process.
     pub(crate) fn new(
         unix_user_id: Uid,
         unix_primary_group_id: Gid,
