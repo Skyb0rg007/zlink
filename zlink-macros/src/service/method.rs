@@ -3,7 +3,7 @@
 use proc_macro2::TokenStream;
 use syn::{
     Attribute, Error, Expr, GenericArgument, Ident, ImplItemFn, Lit, Meta, PathArguments,
-    ReturnType, Type,
+    ReturnType, Type, parse::Parse,
 };
 
 use super::types::ParamInfo;
@@ -16,6 +16,8 @@ pub(super) struct MethodInfo {
     pub varlink_name: String,
     /// The interface name for this method.
     pub interface: Option<String>,
+    /// Custom types scoped to this method's interface (from `#[zlink(types = [...])]`).
+    pub custom_types: Vec<Type>,
     /// Parameters for this method (excluding self).
     pub params: Vec<ParamInfo>,
     /// The return type for serialization (the `T` in `Result<T, E>`, or the type itself).
@@ -289,6 +291,7 @@ impl MethodInfo {
             name,
             varlink_name,
             interface: current_interface.clone(),
+            custom_types: method_attrs.custom_types,
             params,
             return_type,
             returns_result,
@@ -328,6 +331,8 @@ impl MethodInfo {
 struct MethodAttrs {
     /// The interface name for this method.
     interface: Option<String>,
+    /// Custom types scoped to this method's interface.
+    custom_types: Vec<Type>,
     /// Custom method name.
     rename: Option<String>,
     /// Whether this method returns a stream of replies.
@@ -357,62 +362,38 @@ impl MethodAttrs {
                 continue;
             }
 
-            let nested = list.parse_args_with(
-                syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-            )?;
-
-            for meta in nested {
-                match &meta {
-                    Meta::NameValue(nv) if nv.path.is_ident("interface") => {
-                        let Expr::Lit(expr_lit) = &nv.value else {
-                            return Err(Error::new_spanned(
-                                &nv.value,
-                                "interface value must be a string literal",
-                            ));
-                        };
-                        let Lit::Str(lit_str) = &expr_lit.lit else {
-                            return Err(Error::new_spanned(
-                                &nv.value,
-                                "interface value must be a string literal",
-                            ));
-                        };
-                        result.interface = Some(lit_str.value());
+            // Use syn::meta::parser to handle both standard Meta items and custom
+            // `types = [...]` syntax.
+            let parser = syn::meta::parser(|meta| {
+                if meta.path.is_ident("interface") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    result.interface = Some(value.value());
+                } else if meta.path.is_ident("rename") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    result.rename = Some(value.value());
+                } else if meta.path.is_ident("types") {
+                    meta.input.parse::<syn::Token![=]>()?;
+                    let content;
+                    syn::bracketed!(content in meta.input);
+                    let types = content.parse_terminated(Type::parse, syn::Token![,])?;
+                    result.custom_types = types.into_iter().collect();
+                } else if meta.path.is_ident("more") {
+                    if result.is_streaming {
+                        return Err(meta.error("duplicate `more` attribute"));
                     }
-                    Meta::NameValue(nv) if nv.path.is_ident("rename") => {
-                        let Expr::Lit(expr_lit) = &nv.value else {
-                            return Err(Error::new_spanned(
-                                &nv.value,
-                                "rename value must be a string literal",
-                            ));
-                        };
-                        let Lit::Str(lit_str) = &expr_lit.lit else {
-                            return Err(Error::new_spanned(
-                                &nv.value,
-                                "rename value must be a string literal",
-                            ));
-                        };
-                        result.rename = Some(lit_str.value());
+                    result.is_streaming = true;
+                } else if meta.path.is_ident("return_fds") {
+                    if result.return_fds {
+                        return Err(meta.error("duplicate `return_fds` attribute"));
                     }
-                    Meta::Path(path) if path.is_ident("more") => {
-                        if result.is_streaming {
-                            return Err(Error::new_spanned(&meta, "duplicate `more` attribute"));
-                        }
-                        result.is_streaming = true;
-                    }
-                    Meta::Path(path) if path.is_ident("return_fds") => {
-                        if result.return_fds {
-                            return Err(Error::new_spanned(
-                                &meta,
-                                "duplicate `return_fds` attribute",
-                            ));
-                        }
-                        result.return_fds = true;
-                    }
-                    _ => {
-                        return Err(Error::new_spanned(&meta, "unknown zlink attribute"));
-                    }
+                    result.return_fds = true;
+                } else {
+                    return Err(meta.error("unknown zlink attribute"));
                 }
-            }
+                Ok(())
+            });
+
+            syn::parse::Parser::parse2(parser, list.tokens.clone())?;
         }
 
         // Remove zlink attributes in reverse order to preserve indices.

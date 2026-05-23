@@ -923,6 +923,44 @@ fn generate_interface_descriptions(
             .filter(|m| m.interface.as_ref() == Some(interface))
             .collect();
 
+        // Collect custom types scoped to this interface from method-level `types = [...]`,
+        // deduplicating by type path string representation.
+        let mut seen_custom_types = HashSet::new();
+        let per_interface_types: Vec<&Type> = methods_info
+            .iter()
+            .filter(|m| m.interface.as_ref() == Some(interface))
+            .flat_map(|m| m.custom_types.iter())
+            .filter(|ty| {
+                let type_str = ty.to_token_stream().to_string();
+                seen_custom_types.insert(type_str)
+            })
+            .collect();
+
+        // Use per-interface types if any were specified; otherwise fall back to the global list.
+        // This maintains backward compatibility for single-interface services that use the
+        // top-level `types = [...]` attribute.
+        let types_source: Vec<&Type> = if !per_interface_types.is_empty() {
+            per_interface_types
+        } else if interfaces.len() == 1 {
+            service_attrs.custom_types.iter().collect()
+        } else {
+            Vec::new()
+        };
+
+        // Pre-compute the declared-names token slice used in const assertions for both
+        // input parameters (outer block) and output parameters (inner per-method block).
+        let declared_names: Vec<TokenStream> = types_source
+            .iter()
+            .map(|ty| {
+                let ty = convert_type_lifetimes(ty, "'static");
+                quote! {
+                    #crate_path::introspect::assert::custom_type_name(
+                        <#ty as #crate_path::introspect::Type>::TYPE,
+                    ).expect("types = [...] entry is not a custom type")
+                }
+            })
+            .collect();
+
         // Generate inner const method definitions.
         // Each method needs its own const to avoid destructor issues.
         let method_consts: Vec<TokenStream> = interface_methods
@@ -963,27 +1001,50 @@ fn generate_interface_descriptions(
                     }
                 };
 
+                // Collect all custom types visible to this method: service-level types
+                // plus any per-interface types declared on the method itself.
+                let all_custom_types: Vec<&Type> = service_attrs
+                    .custom_types
+                    .iter()
+                    .chain(method.custom_types.iter())
+                    .collect();
+
+                // TODO: Varlink methods natively express flat named outputs (`-> (field: type, …)`),
+                // but Rust lacks anonymous named structs. Today, users must wrap their output in a
+                // named struct (e.g. `struct Reply { books: Vec<Book> }`), which the macro then
+                // "unwraps" by emitting the struct fields as the method's out-params. This causes
+                // wrapper structs to appear redundantly as top-level type definitions in the IDL.
+                // A future enhancement could let users write `-> (field: type)` directly in the
+                // method attribute to sidestep the wrapper-struct requirement.
                 let out_params_const = if method.is_streaming {
                     method.stream_item_type.clone()
                 } else {
                     method.return_type.clone()
                 }
                 .map(|ty| {
-                    if service_attrs.custom_types.contains(&ty) {
+                    if all_custom_types.contains(&&ty) {
+                        // Declared custom type: must be an object (struct) so its fields
+                        // can be emitted as named out-params. Custom enums are not valid
+                        // Varlink return types — the spec requires `-> (field: type, …)`.
                         quote! {
                             const __OUT_PARAMS: &[&#crate_path::idl::Parameter<'static>] =
                                 <#ty as #crate_path::introspect::CustomType>::CUSTOM_TYPE
                                     .as_object()
-                                    .expect("Return type has to be an object")
+                                    .expect("Varlink method return type must be a struct (object); \
+                                             enums and other types are not valid Varlink return types")
                                     .fields_as_slice()
                                     .unwrap();
                         }
                     } else {
+                        // Inline/anonymous object type via introspect::Type.
                         quote! {
                             const __OUT_PARAMS: &[&#crate_path::idl::Parameter<'static>] =
                                 <#ty as #crate_path::introspect::Type>::TYPE
                                     .as_object()
-                                    .expect("Return type has to be an object")
+                                    .expect("Varlink method return type must be a struct (object); \
+                                             arrays, primitives and other types cannot be used \
+                                             as top-level return types — wrap them in a struct, \
+                                             e.g. `struct Reply { items: Vec<T> }`")
                                     .as_borrowed()
                                     .unwrap();
                         }
@@ -999,6 +1060,14 @@ fn generate_interface_descriptions(
                     const #method_const_name: &#crate_path::idl::Method<'static> = &{
                         #in_params_const
                         #out_params_const
+                        // Verify all custom types in method output parameters are declared.
+                        const _: () = {
+                            const __DECLARED: &[&str] = &[#(#declared_names),*];
+                            #crate_path::introspect::assert::assert_params_declared(
+                                __OUT_PARAMS,
+                                __DECLARED,
+                            );
+                        };
                         #crate_path::idl::Method::new(
                             #method_name,
                             __IN_PARAMS,
@@ -1018,9 +1087,7 @@ fn generate_interface_descriptions(
             })
             .collect();
 
-        // Collect custom types for this interface.
-        let custom_types: Vec<TokenStream> = service_attrs
-            .custom_types
+        let custom_types: Vec<TokenStream> = types_source
             .iter()
             .map(|ty| {
                 quote! {
@@ -1063,6 +1130,27 @@ fn generate_interface_descriptions(
             quote! { #first_err }
         };
 
+        // Generate compile-time assertions that custom types referenced in method input
+        // parameters are declared in `types = [...]`.  Output parameters are asserted
+        // inside each __METHOD_N block (where __OUT_PARAMS is in scope).
+        let type_assertions: Vec<TokenStream> = interface_methods
+            .iter()
+            .flat_map(|method| {
+                method
+                    .serialized_params()
+                    .map(|p| {
+                        let ty = convert_type_lifetimes(&p.ty, "'static");
+                        quote! {
+                            #crate_path::introspect::assert::assert_type_declared(
+                                <#ty as #crate_path::introspect::Type>::TYPE,
+                                __DECLARED,
+                            );
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
         descriptions.push(quote! {
             #[doc(hidden)]
             const #const_name: &#crate_path::idl::Interface<'static> = &{
@@ -1074,6 +1162,12 @@ fn generate_interface_descriptions(
                     #error_variants_expr,
                     &[],
                 )
+            };
+
+            // Verify all custom types in method parameters are declared.
+            const _: () = {
+                const __DECLARED: &[&str] = &[#(#declared_names),*];
+                #(#type_assertions)*
             };
         });
     }

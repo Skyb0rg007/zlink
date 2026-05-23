@@ -53,6 +53,7 @@ tokio = { version = "1.42.0", features = [
     "rt-multi-thread",
     "fs",
 ] }
+tempfile = "3.14"
 test-log = { version = "0.2.17", default-features = false, features = [
     "trace",
     "color",

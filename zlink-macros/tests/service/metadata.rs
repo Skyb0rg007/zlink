@@ -9,22 +9,17 @@ use zlink::{
 async fn with_metadata() -> Result<(), Box<dyn std::error::Error>> {
     use zlink::varlink_service::Proxy as VarlinkProxy;
 
-    // Remove the socket file if it exists.
-    let socket_path = "/tmp/zlink-service-macro-metadata-test.sock";
-    if let Err(e) = tokio::fs::remove_file(socket_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
 
     // Setup the server with a service that has metadata.
-    let listener = bind(socket_path).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let service = MetadataService;
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
         res = async {
-            let mut conn = connect(socket_path).await?;
+            let mut conn = connect(&socket_path).await?;
 
             // Test GetInfo - should return service metadata.
             let info = conn.get_info().await?.unwrap();

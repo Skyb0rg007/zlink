@@ -14,6 +14,9 @@ pub use custom_type::CustomType;
 mod reply_error;
 pub use reply_error::ReplyError;
 
+#[doc(hidden)]
+pub mod assert;
+
 // Re-export the the derive macro so it's available alongside the traits.
 pub use zlink_macros::{
     IntrospectCustomType as CustomType, IntrospectReplyError as ReplyError, IntrospectType as Type,

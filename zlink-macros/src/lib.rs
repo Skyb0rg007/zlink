@@ -1017,8 +1017,10 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///   that implement a single interface. Methods can still override this with method-level
 ///   `#[zlink(interface = "...")]`.
 /// * `types = [Type1, Type2, ...]` - Custom types to include in interface descriptions. These types
-///   must implement `CustomType` (typically via `#[derive(CustomType)]`). The types are included in
-///   the IDL for any interface that uses them.
+///   must implement `CustomType` (typically via `#[derive(CustomType)]`). For single-interface
+///   services, these types are included in that interface's IDL output. For multi-interface
+///   services, prefer specifying types per interface using the method-level `#[zlink(interface =
+///   "...", types = [...])]` attribute instead.
 /// * `vendor = <expr>` - The vendor name for `GetInfo` response. Defaults to empty string.
 /// * `product = <expr>` - The product name for `GetInfo` response. Defaults to empty string.
 /// * `version = <expr>` - The version string for `GetInfo` response. Defaults to empty string. E.g.
@@ -1029,6 +1031,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// * `#[zlink(interface = "...")]` - Set the interface name for this and subsequent methods. If an
 ///   interface is specified at the impl block level, this overrides it for the current method.
+/// * `#[zlink(interface = "...", types = [Type1, ...])]` - Set the interface and associate custom
+///   types with it. This scopes the types to the specified interface so they only appear in that
+///   interface's introspection output. Particularly useful for multi-interface services.
 /// * `#[zlink(rename = "MethodName")]` - Custom Varlink method name.
 ///
 /// ## On parameters:
@@ -1037,6 +1042,33 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// * `#[zlink(connection)]` - Mark this parameter to receive a mutable reference to the connection.
 ///   This is useful for accessing peer credentials or other connection-specific functionality.
 ///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyService`).
+///
+/// # Compile-time Type Checking
+///
+/// The macro verifies at compile time that any custom type referenced in a method's input *or*
+/// output parameters is declared in `types = [...]`. If you forget to list a type, you'll get
+/// a compile error:
+///
+/// ```rust,compile_fail
+/// use serde::{Deserialize, Serialize};
+/// use zlink::{introspect::CustomType, service};
+///
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
+/// struct Book { title: String }
+///
+/// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, CustomType)]
+/// struct BookList { books: Vec<Book> }
+///
+/// struct LibraryService;
+///
+/// // Missing `BookList` in `types = [...]` even though it's returned by `list_books`.
+/// #[service(interface = "org.example.library", types = [Book])]
+/// impl LibraryService {
+///     async fn list_books(&self) -> BookList {
+///         BookList { books: vec![] }
+///     }
+/// }
+/// ```
 ///
 /// # Generated Code
 ///

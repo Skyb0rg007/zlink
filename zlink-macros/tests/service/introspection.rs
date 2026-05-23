@@ -9,27 +9,22 @@ use zlink::{
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn introspection() -> Result<(), Box<dyn std::error::Error>> {
-    // Remove the socket file if it exists.
-    let socket_path = "/tmp/zlink-service-macro-introspection-test.sock";
-    if let Err(e) = tokio::fs::remove_file(socket_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
 
     // Setup the server with metadata.
-    let listener = bind(socket_path).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let service = BankAccount::new(1000, false);
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
-        res = run_client(socket_path) => res?,
+        res = run_client(&socket_path) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     use zlink::varlink_service::Proxy as VarlinkProxy;
 
     let mut conn = connect(socket_path).await?;
