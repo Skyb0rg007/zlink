@@ -16,10 +16,21 @@ pub trait Listener: core::fmt::Debug {
 
 /// A listener that already has a socket.
 ///
-/// This is useful for services that get spawned by systemd and handed over a socket.
+/// This is useful for services spawned by their supervisor with a connected socket already in
+/// hand (systemd `Accept=yes`, `varlinkctl exec:`, etc.). [`Server::run`] exits cleanly once the
+/// handed-out connection closes.
+///
+/// [`Server::run`]: crate::Server::run
 #[derive(Debug)]
 pub struct ReadyListener<Sock: Socket> {
-    socket: Option<Sock>,
+    state: ReadyListenerState<Sock>,
+}
+
+#[derive(Debug)]
+enum ReadyListenerState<Sock: Socket> {
+    Ready(Sock),
+    Handed,
+    Closed,
 }
 
 impl<Sock> ReadyListener<Sock>
@@ -29,7 +40,7 @@ where
     /// Create a new listener from a socket.
     pub fn new(socket: Sock) -> Self {
         Self {
-            socket: Some(socket),
+            state: ReadyListenerState::Ready(socket),
         }
     }
 }
@@ -40,13 +51,20 @@ where
 {
     type Socket = Sock;
 
-    /// This implementation simply returns the contained socket.
-    ///
-    /// After the first call, in simply never returns on subsequent calls.
+    /// Returns the contained socket on the first call, then reports closure.
     async fn accept(&mut self) -> Result<Option<Connection<Self::Socket>>> {
-        match self.socket.take() {
-            Some(socket) => Ok(Some(Connection::new(socket))),
-            None => core::future::pending().await,
+        match core::mem::replace(&mut self.state, ReadyListenerState::Handed) {
+            ReadyListenerState::Ready(socket) => Ok(Some(Connection::new(socket))),
+            ReadyListenerState::Handed => {
+                self.state = ReadyListenerState::Closed;
+
+                Ok(None)
+            }
+            ReadyListenerState::Closed => {
+                self.state = ReadyListenerState::Closed;
+
+                core::future::pending().await
+            }
         }
     }
 }
@@ -68,7 +86,10 @@ mod tests {
         let (read, write) = conn.split();
         assert_eq!(read.id(), write.id());
 
-        // Second call should be pending forever.
+        // Second call reports closure.
+        assert!(matches!(listener.accept().await, Ok(None)));
+
+        // Subsequent calls pend forever.
         let accept_fut = listener.accept();
         futures_util::pin_mut!(accept_fut);
         let is_pending = poll_fn(|cx| Poll::Ready(accept_fut.as_mut().poll(cx).is_pending())).await;
