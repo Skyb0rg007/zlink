@@ -105,9 +105,10 @@ where
 
             futures_util::select_biased! {
                 // 1. Accept a new connection.
-                conn = listener.accept().fuse() => {
-                    connections.push(conn?);
-                }
+                conn = listener.accept().fuse() => match conn? {
+                    Some(conn) => connections.push(conn),
+                    None => (),
+                },
                 // 2. Read method calls from the existing connections and handle them.
                 (idx, result) = read_select_all.fuse() => {
                         #[cfg(feature = "std")]

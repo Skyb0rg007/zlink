@@ -8,7 +8,10 @@ pub trait Listener: core::fmt::Debug {
     type Socket: Socket;
 
     /// Accept a new connection.
-    fn accept(&mut self) -> impl Future<Output = Result<Connection<Self::Socket>>>;
+    ///
+    /// Returns `Ok(None)` to signal that no more connections will be produced. Once `Ok(None)`
+    /// has been returned, subsequent calls must pend forever — the listener is considered closed.
+    fn accept(&mut self) -> impl Future<Output = Result<Option<Connection<Self::Socket>>>>;
 }
 
 /// A listener that already has a socket.
@@ -40,9 +43,9 @@ where
     /// This implementation simply returns the contained socket.
     ///
     /// After the first call, in simply never returns on subsequent calls.
-    async fn accept(&mut self) -> Result<Connection<Self::Socket>> {
+    async fn accept(&mut self) -> Result<Option<Connection<Self::Socket>>> {
         match self.socket.take() {
-            Some(socket) => Ok(Connection::new(socket)),
+            Some(socket) => Ok(Some(Connection::new(socket))),
             None => core::future::pending().await,
         }
     }
@@ -61,7 +64,7 @@ mod tests {
         let mut listener = ReadyListener::new(socket);
 
         // First call returns a connection with properly split read/write halves.
-        let conn = listener.accept().await.unwrap();
+        let conn = listener.accept().await.unwrap().unwrap();
         let (read, write) = conn.split();
         assert_eq!(read.id(), write.id());
 
