@@ -139,6 +139,10 @@ pub struct ReadResult {
     /// The file descriptors received, if any. This is only available with the `std` feature.
     #[cfg(feature = "std")]
     fds: alloc::vec::Vec<OwnedFd>,
+    /// The credentials received, if any. This is only available with the `std` feature and `linux`
+    /// target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    credentials: Option<crate::connection::PassedCredentials>,
 }
 
 impl ReadResult {
@@ -149,6 +153,8 @@ impl ReadResult {
             bytes_read,
             #[cfg(feature = "std")]
             fds: vec![],
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            credentials: None,
         }
     }
 
@@ -163,6 +169,13 @@ impl ReadResult {
         &self.fds
     }
 
+    /// The credentials received, if any. This is only available with the `std` feature and `linux`
+    /// target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn credentials(&self) -> Option<&crate::connection::PassedCredentials> {
+        self.credentials.as_ref()
+    }
+
     /// Sets the file descriptors received, if any. This is only available with the `std` feature.
     #[cfg(feature = "std")]
     #[doc(hidden)]
@@ -171,6 +184,19 @@ impl ReadResult {
         F: Into<alloc::vec::Vec<OwnedFd>>,
     {
         self.fds = fds.into();
+
+        self
+    }
+
+    /// Sets the credentials received, if any. This is only available with the `std` feature and
+    /// `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn set_credentials(
+        mut self,
+        credentials: Option<crate::connection::PassedCredentials>,
+    ) -> Self {
+        self.credentials = credentials;
 
         self
     }
@@ -187,5 +213,19 @@ impl ReadResult {
     #[cfg(feature = "std")]
     pub fn into_fds(self) -> alloc::vec::Vec<OwnedFd> {
         self.fds
+    }
+
+    /// Takes the credentials received, leaving `None` in their place. This is only available with
+    /// the `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn take_credentials(&mut self) -> Option<crate::connection::PassedCredentials> {
+        self.credentials.take()
+    }
+
+    /// Consumes this `ReadResult` and returns the credentials received, if any. This is only
+    /// available with the `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn into_credentials(self) -> Option<crate::connection::PassedCredentials> {
+        self.credentials
     }
 }

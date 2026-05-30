@@ -657,6 +657,15 @@ where
         // method doesn't error out.
         Ok(self.credentials.as_ref().unwrap())
     }
+
+    /// The credentials passed through over the socket with the latest message (if any).
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn received_credentials(&self) -> Option<&std::sync::Arc<PassedCredentials>>
+    where
+        S::ReadHalf: socket::UnixSocket,
+    {
+        self.read.received_credentials()
+    }
 }
 
 impl<S> From<S> for Connection<S>

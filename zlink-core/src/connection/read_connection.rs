@@ -2,6 +2,8 @@
 
 use core::{fmt::Debug, str::from_utf8_unchecked};
 
+#[cfg(all(feature = "std", target_os = "linux"))]
+use crate::connection::PassedCredentials;
 use crate::{Result, varlink_service};
 
 use super::{
@@ -43,6 +45,8 @@ pub struct ReadConnection<Read: ReadHalf> {
     // `WriteConnection::held_fds` on macOS. See that field's comment for details.
     #[cfg(all(feature = "std", target_os = "macos"))]
     pub(super) fd_recvs: usize,
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    received_credentials: Option<std::sync::Arc<PassedCredentials>>,
 }
 
 impl<Read: ReadHalf> ReadConnection<Read> {
@@ -58,6 +62,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             pending_fds: VecDeque::new(),
             #[cfg(all(feature = "std", target_os = "macos"))]
             fd_recvs: 0,
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            received_credentials: None,
         }
     }
 
@@ -237,5 +243,14 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     /// The underlying read half of the socket.
     pub fn read_half(&self) -> &Read {
         &self.socket
+    }
+
+    /// The credentials passed through over the socket with the latest message (if any).
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn received_credentials(&self) -> Option<&std::sync::Arc<PassedCredentials>>
+    where
+        Read: super::socket::UnixSocket,
+    {
+        self.received_credentials.as_ref()
     }
 }
