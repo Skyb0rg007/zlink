@@ -5,20 +5,6 @@ use core::future::Future;
 #[cfg(feature = "std")]
 use std::os::fd::{AsFd, OwnedFd};
 
-/// Result type for [`ReadHalf::read`] operations.
-///
-/// With `std` feature: returns `(usize, Vec<OwnedFd>)` - bytes read and file descriptors.
-/// Without `std` feature: returns `usize` - just bytes read.
-#[cfg(feature = "std")]
-pub type ReadResult = (usize, alloc::vec::Vec<OwnedFd>);
-
-/// Result type for [`ReadHalf::read`] operations.
-///
-/// With `std` feature: returns `(usize, Vec<OwnedFd>)` - bytes read and file descriptors.
-/// Without `std` feature: returns `usize` - just bytes read.
-#[cfg(not(feature = "std"))]
-pub type ReadResult = usize;
-
 /// The socket trait.
 ///
 /// This is the trait that needs to be implemented for a type to be used as a socket/transport.
@@ -142,5 +128,64 @@ pub mod impl_for_doc {
         ) -> crate::Result<()> {
             unreachable!("This is only for doc tests")
         }
+    }
+}
+
+/// Result type for [`ReadHalf::read`] operations.
+#[derive(Debug)]
+pub struct ReadResult {
+    /// The number of bytes read.
+    bytes_read: usize,
+    /// The file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    fds: alloc::vec::Vec<OwnedFd>,
+}
+
+impl ReadResult {
+    /// Creates a new `ReadResult` with the given number of bytes read.
+    #[doc(hidden)]
+    pub fn new(bytes_read: usize) -> Self {
+        Self {
+            bytes_read,
+            #[cfg(feature = "std")]
+            fds: vec![],
+        }
+    }
+
+    /// The number of bytes read.
+    pub fn bytes_read(&self) -> usize {
+        self.bytes_read
+    }
+
+    /// The file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn fds(&self) -> &[OwnedFd] {
+        &self.fds
+    }
+
+    /// Sets the file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    #[doc(hidden)]
+    pub fn set_fds<F>(mut self, fds: F) -> Self
+    where
+        F: Into<alloc::vec::Vec<OwnedFd>>,
+    {
+        self.fds = fds.into();
+
+        self
+    }
+
+    /// Takes the file descriptors received, leaving an empty list in their place. This is only
+    /// available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn take_fds(&mut self) -> alloc::vec::Vec<OwnedFd> {
+        core::mem::take(&mut self.fds)
+    }
+
+    /// Consumes this `ReadResult` and returns the file descriptors received, if any. This is only
+    /// available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn into_fds(self) -> alloc::vec::Vec<OwnedFd> {
+        self.fds
     }
 }

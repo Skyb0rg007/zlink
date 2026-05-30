@@ -4,18 +4,20 @@
 //! runtime-specific socket implementations.
 
 use core::mem::MaybeUninit;
+#[cfg(target_os = "linux")]
+use std::os::fd::OwnedFd;
 use std::{
     io,
-    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::fd::{AsFd, BorrowedFd},
 };
 
-use crate::connection::Credentials;
+use crate::connection::{Credentials, socket::ReadResult};
 
 /// Receive a message from a Unix socket, including any file descriptors.
 ///
 /// This is a low-level helper that performs the `recvmsg` syscall.
 #[doc(hidden)]
-pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<(usize, alloc::vec::Vec<OwnedFd>)> {
+pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<ReadResult> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
     use std::io::IoSliceMut;
 
@@ -32,7 +34,11 @@ pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<(usize, alloc::vec::
                     fds.extend(rights);
                 }
             }
-            (msg.bytes, fds)
+            let result = ReadResult::new(msg.bytes);
+            #[cfg(feature = "std")]
+            let result = result.set_fds(fds);
+
+            result
         })
         .map_err(io::Error::from)
 }

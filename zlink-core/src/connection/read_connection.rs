@@ -196,18 +196,15 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         }
 
         loop {
-            #[cfg(feature = "std")]
-            let (bytes_read, fds) = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
-            #[cfg(not(feature = "std"))]
-            let bytes_read = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            let result = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
 
-            if bytes_read == 0 {
+            if result.bytes_read() == 0 {
                 return Err(crate::Error::UnexpectedEof);
             }
-            self.read_pos += bytes_read;
+            self.read_pos += result.bytes_read();
             #[cfg(feature = "std")]
-            if !fds.is_empty() {
-                self.pending_fds.push_back(fds);
+            if !result.fds().is_empty() {
+                self.pending_fds.push_back(result.into_fds());
                 // Track receipt so `Connection` can drain `WriteConnection::held_fds`.
                 #[cfg(target_os = "macos")]
                 {

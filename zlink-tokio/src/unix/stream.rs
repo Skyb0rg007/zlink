@@ -3,10 +3,11 @@ use crate::{
     connection::socket::{self, Socket},
 };
 use std::os::{
-    fd::{AsFd, BorrowedFd, OwnedFd},
+    fd::{AsFd, BorrowedFd},
     unix::net::UnixStream as StdUnixStream,
 };
 use tokio::net::{UnixStream, unix};
+use zlink_core::connection::socket::ReadResult;
 
 /// The connection type that uses Unix Domain Sockets for transport.
 pub type Connection = crate::Connection<Stream>;
@@ -68,7 +69,7 @@ impl AsFd for Stream {
 pub struct ReadHalf(unix::OwnedReadHalf);
 
 impl socket::ReadHalf for ReadHalf {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Vec<OwnedFd>)> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<ReadResult> {
         use std::{future::poll_fn, task::Poll};
 
         poll_fn(|cx| {

@@ -6,7 +6,7 @@
 
 #[cfg(feature = "std")]
 use crate::connection;
-use crate::connection::socket::{ReadHalf, Socket, WriteHalf};
+use crate::connection::socket::{ReadHalf, ReadResult, Socket, WriteHalf};
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use core::cell::RefCell;
@@ -120,13 +120,10 @@ impl MockReadHalf {
 
 impl ReadHalf for MockReadHalf {
     #[cfg(feature = "std")]
-    async fn read(
-        &mut self,
-        buf: &mut [u8],
-    ) -> crate::Result<(usize, alloc::vec::Vec<std::os::fd::OwnedFd>)> {
+    async fn read(&mut self, buf: &mut [u8]) -> crate::Result<ReadResult> {
         // No more messages - EOF.
         if self.msg_index >= self.messages.len() {
-            return Ok((0, Vec::new()));
+            return Ok(ReadResult::new(0));
         }
 
         let msg = &self.messages[self.msg_index];
@@ -149,14 +146,14 @@ impl ReadHalf for MockReadHalf {
             Vec::new()
         };
 
-        Ok((to_read, fds))
+        Ok(ReadResult::new(to_read).set_fds(fds))
     }
 
     #[cfg(not(feature = "std"))]
-    async fn read(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+    async fn read(&mut self, buf: &mut [u8]) -> crate::Result<ReadResult> {
         // No more messages - EOF.
         if self.msg_index >= self.messages.len() {
-            return Ok(0);
+            return Ok(ReadResult::new(0));
         }
 
         let msg = &self.messages[self.msg_index];
@@ -171,7 +168,7 @@ impl ReadHalf for MockReadHalf {
             self.pos_in_msg = 0;
         }
 
-        Ok(to_read)
+        Ok(ReadResult::new(to_read))
     }
 }
 
@@ -406,13 +403,13 @@ mod tests {
         let (mut read, _write) = socket.split();
 
         let mut buf = [0u8; 10]; // Small buffer to force multiple reads
-        let (bytes, fds1) = read.read(&mut buf).await.unwrap();
-        assert!(bytes > 0);
-        assert_eq!(fds1.len(), 1);
+        let result = read.read(&mut buf).await.unwrap();
+        assert!(result.bytes_read() > 0);
+        assert_eq!(result.fds().len(), 1);
 
-        let (bytes, fds2) = read.read(&mut buf).await.unwrap();
-        assert!(bytes > 0);
-        assert_eq!(fds2.len(), 1);
+        let result = read.read(&mut buf).await.unwrap();
+        assert!(result.bytes_read() > 0);
+        assert_eq!(result.fds().len(), 1);
     }
 
     #[tokio::test]
@@ -475,9 +472,9 @@ mod tests {
         let (mut read, _write) = socket.split();
 
         let mut buf = [0u8; 1024];
-        let (bytes, fds) = read.read(&mut buf).await.unwrap();
-        assert!(bytes > 0);
-        assert_eq!(fds.len(), 3);
+        let result = read.read(&mut buf).await.unwrap();
+        assert!(result.bytes_read() > 0);
+        assert_eq!(result.fds().len(), 3);
     }
 
     #[tokio::test]
@@ -493,12 +490,12 @@ mod tests {
 
         let mut buf = [0u8; 10]; // Small buffer to force multiple reads
 
-        let (bytes, fds1) = read.read(&mut buf).await.unwrap();
-        assert!(bytes > 0);
-        assert!(!fds1.is_empty());
+        let result = read.read(&mut buf).await.unwrap();
+        assert!(result.bytes_read() > 0);
+        assert!(!result.fds().is_empty());
 
-        let (bytes, fds2) = read.read(&mut buf).await.unwrap();
-        assert!(bytes > 0);
-        assert!(fds2.is_empty());
+        let result = read.read(&mut buf).await.unwrap();
+        assert!(result.bytes_read() > 0);
+        assert!(result.fds().is_empty());
     }
 }
