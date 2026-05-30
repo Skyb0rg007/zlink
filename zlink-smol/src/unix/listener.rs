@@ -24,9 +24,9 @@ pub struct Listener {
 impl crate::Listener for Listener {
     type Socket = super::Stream;
 
-    async fn accept(&mut self) -> Result<Connection<Self::Socket>> {
+    async fn accept(&mut self) -> Result<Option<Connection<Self::Socket>>> {
         let (stream, _) = self.listener.accept().await?;
-        Ok(super::Stream::from(stream).into())
+        Ok(Some(super::Stream::from(stream).into()))
     }
 }
 
@@ -74,7 +74,7 @@ mod tests {
                         .unwrap()
                 });
 
-                let connection = listener.accept().await.unwrap();
+                let connection = listener.accept().await.unwrap().unwrap();
                 let id = connection.id();
 
                 // Each connection should have a unique ID
@@ -113,7 +113,7 @@ mod tests {
                     .unwrap()
             });
 
-            let connection = listener.accept().await.unwrap();
+            let connection = listener.accept().await.unwrap().unwrap();
             // Just verify we got a valid connection with an ID
             let id = connection.id();
             assert!(id < usize::MAX);

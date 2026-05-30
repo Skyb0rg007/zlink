@@ -2,7 +2,10 @@ use crate::{
     Result,
     connection::socket::{self, Socket},
 };
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::{
+    fd::{AsFd, BorrowedFd, OwnedFd},
+    unix::net::UnixStream as StdUnixStream,
+};
 use tokio::net::{UnixStream, unix};
 
 /// The connection type that uses Unix Domain Sockets for transport.
@@ -40,6 +43,15 @@ impl Socket for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Self(stream)
+    }
+}
+
+impl TryFrom<StdUnixStream> for Stream {
+    type Error = crate::Error;
+
+    fn try_from(stream: StdUnixStream) -> Result<Self> {
+        stream.set_nonblocking(true)?;
+        UnixStream::from_std(stream).map(Self).map_err(Into::into)
     }
 }
 

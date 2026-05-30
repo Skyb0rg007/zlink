@@ -67,8 +67,13 @@ where
         let mut read_futures = Vec::new();
         let mut last_reply_stream_winner = None;
         let mut last_method_call_winner = None;
+        let mut listener_closed = false;
 
         loop {
+            if listener_closed && connections.is_empty() && reply_streams.is_empty() {
+                return Ok(());
+            }
+
             // We re-populate the `reply_stream_futures` in each iteration so we must clear it
             // first.
             reply_stream_futures.clear();
@@ -105,9 +110,10 @@ where
 
             futures_util::select_biased! {
                 // 1. Accept a new connection.
-                conn = listener.accept().fuse() => {
-                    connections.push(conn?);
-                }
+                conn = listener.accept().fuse() => match conn? {
+                    Some(conn) => connections.push(conn),
+                    None => listener_closed = true,
+                },
                 // 2. Read method calls from the existing connections and handle them.
                 (idx, result) = read_select_all.fuse() => {
                         #[cfg(feature = "std")]

@@ -27,7 +27,7 @@ async fn peer_credentials_unix_socket() {
             .unwrap()
     });
 
-    let mut connection = listener.accept().await.unwrap();
+    let mut connection = listener.accept().await.unwrap().unwrap();
 
     // Get peer credentials.
     let creds = connection.peer_credentials().await.unwrap();
