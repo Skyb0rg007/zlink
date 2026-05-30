@@ -79,6 +79,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     {
         use std::os::fd::FromRawFd;
+
         // Get SO_PEERCRED (uid, gid, pid).
         let ucred = rustix::net::sockopt::socket_peercred(fd)?;
         let uid = ucred.uid;
