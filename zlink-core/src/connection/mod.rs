@@ -47,6 +47,8 @@ mod credentials;
 mod read_connection;
 #[cfg(feature = "std")]
 pub use credentials::Credentials;
+#[cfg(feature = "std")]
+pub use credentials::PassedCredentials;
 pub use read_connection::ReadConnection;
 #[cfg(feature = "std")]
 pub use rustix::{process::Gid, process::Pid, process::Uid};

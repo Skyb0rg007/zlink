@@ -11,7 +11,7 @@ use std::{
     os::fd::{AsFd, BorrowedFd},
 };
 
-use crate::connection::{Credentials, socket::ReadResult};
+use crate::connection::{Credentials, PassedCredentials, socket::ReadResult};
 
 /// Receive a message from a Unix socket, including any file descriptors.
 ///
@@ -175,9 +175,13 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         };
 
         #[cfg(target_os = "android")]
-        let creds = Credentials::new(uid, primary_gid, pid);
+        let creds = Credentials::new(PassedCredentials::new(uid, primary_gid, pid));
         #[cfg(target_os = "linux")]
-        let creds = Credentials::new(uid, primary_gid, supplementary_gids, pid, process_fd);
+        let creds = Credentials::new(
+            PassedCredentials::new(uid, primary_gid, pid),
+            supplementary_gids,
+            process_fd,
+        );
 
         Ok(creds)
     }
@@ -298,7 +302,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         #[cfg(any(target_os = "freebsd", target_os = "dragonfly"))]
         let pid = rustix::process::Pid::from_raw(0).unwrap();
 
-        Ok(Credentials::new(uid, gid, pid))
+        Ok(Credentials::new(PassedCredentials::new(uid, gid, pid)))
     }
 
     #[cfg(not(any(
