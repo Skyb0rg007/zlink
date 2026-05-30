@@ -49,6 +49,15 @@ impl From<Async<StdUnixStream>> for Stream {
     }
 }
 
+impl TryFrom<StdUnixStream> for Stream {
+    type Error = crate::Error;
+
+    fn try_from(stream: StdUnixStream) -> Result<Self> {
+        stream.set_nonblocking(true)?;
+        Ok(Self(Async::new(stream)?))
+    }
+}
+
 impl AsFd for Stream {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
