@@ -21,22 +21,36 @@ pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<ReadResult> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
     use std::io::IoSliceMut;
 
+    #[cfg(target_os = "linux")]
+    let mut cmsg_buf =
+        [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS), ScmCredentials(1))];
+    #[cfg(not(target_os = "linux"))]
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut control = RecvAncillaryBuffer::new(&mut cmsg_buf);
 
     let mut iov = [IoSliceMut::new(buf)];
     recvmsg(fd.as_fd(), &mut iov, &mut control, RecvFlags::empty())
         .map(|msg| {
-            // Extract file descriptors from ancillary data.
+            // Extract file descriptors and credentials from ancillary data.
             let mut fds = alloc::vec::Vec::new();
+            #[cfg(target_os = "linux")]
+            let mut creds = None;
             for m in control.drain() {
-                if let RecvAncillaryMessage::ScmRights(rights) = m {
-                    fds.extend(rights);
+                match m {
+                    RecvAncillaryMessage::ScmRights(rights) => fds.extend(rights),
+                    #[cfg(target_os = "linux")]
+                    RecvAncillaryMessage::ScmCredentials(ucreds) => {
+                        creds = Some(PassedCredentials::new(ucreds.uid, ucreds.gid, ucreds.pid));
+                    }
+                    // Ignore the rest (currently non on Linux).
+                    _ => (),
                 }
             }
             let result = ReadResult::new(msg.bytes);
             #[cfg(feature = "std")]
             let result = result.set_fds(fds);
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            let result = result.set_credentials(creds);
 
             result
         })

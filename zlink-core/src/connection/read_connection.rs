@@ -203,11 +203,17 @@ impl<Read: ReadHalf> ReadConnection<Read> {
 
         loop {
             let result = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            let mut result = result;
 
             if result.bytes_read() == 0 {
                 return Err(crate::Error::UnexpectedEof);
             }
             self.read_pos += result.bytes_read();
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            if let Some(creds) = result.take_credentials() {
+                self.received_credentials = Some(std::sync::Arc::new(creds));
+            }
             #[cfg(feature = "std")]
             if !result.fds().is_empty() {
                 self.pending_fds.push_back(result.into_fds());
