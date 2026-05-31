@@ -438,6 +438,9 @@ impl WriteHalf for BiPipeWriteHalf {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+            &zlink_core::connection::PassedCredentials,
+        >,
     ) -> zlink_core::Result<()> {
         self.sender
             .send(buf.to_vec())

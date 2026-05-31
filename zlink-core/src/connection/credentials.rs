@@ -76,7 +76,8 @@ pub struct PassedCredentials {
 }
 
 impl PassedCredentials {
-    pub(crate) fn new(unix_user_id: Uid, unix_primary_group_id: Gid, process_id: Pid) -> Self {
+    /// Create a new `PassedCredentials` instance.
+    pub fn new(unix_user_id: Uid, unix_primary_group_id: Gid, process_id: Pid) -> Self {
         Self {
             unix_user_id,
             unix_primary_group_id,

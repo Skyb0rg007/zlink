@@ -61,10 +61,19 @@ pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<ReadResult> {
 ///
 /// This is a low-level helper that performs the `sendmsg` syscall.
 #[doc(hidden)]
-pub fn sendmsg(fd: impl AsFd, buf: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<usize> {
+pub fn sendmsg(
+    fd: impl AsFd,
+    buf: &[u8],
+    fds: &[BorrowedFd<'_>],
+    #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
+) -> io::Result<usize> {
     use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
     use std::io::IoSlice;
 
+    #[cfg(target_os = "linux")]
+    let mut cmsg_buf =
+        [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS), ScmCredentials(1))];
+    #[cfg(not(target_os = "linux"))]
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut control = SendAncillaryBuffer::new(&mut cmsg_buf);
 
@@ -73,6 +82,21 @@ pub fn sendmsg(fd: impl AsFd, buf: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<
             io::ErrorKind::InvalidInput,
             "too many file descriptors to send",
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Some(creds) = creds {
+        let ucred = rustix::net::UCred {
+            pid: creds.process_id(),
+            uid: creds.unix_user_id(),
+            gid: creds.unix_primary_group_id(),
+        };
+        if !control.push(SendAncillaryMessage::ScmCredentials(ucred)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to push credentials",
+            ));
+        }
     }
 
     let iov = [IoSlice::new(buf)];

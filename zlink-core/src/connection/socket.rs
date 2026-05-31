@@ -51,6 +51,9 @@ pub trait WriteHalf: core::fmt::Debug {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] fds: &[impl AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
     ) -> impl Future<Output = crate::Result<()>>;
 }
 
@@ -125,6 +128,9 @@ pub mod impl_for_doc {
             &mut self,
             _buf: &[u8],
             #[cfg(feature = "std")] _fds: &[impl super::AsFd],
+            #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+                &crate::connection::PassedCredentials,
+            >,
         ) -> crate::Result<()> {
             unreachable!("This is only for doc tests")
         }

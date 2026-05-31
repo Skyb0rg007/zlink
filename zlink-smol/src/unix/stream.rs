@@ -106,7 +106,12 @@ impl socket::UnixSocket for ReadHalf {}
 pub struct WriteHalf(Arc<Async<StdUnixStream>>);
 
 impl socket::WriteHalf for WriteHalf {
-    async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> Result<()> {
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        fds: &[impl AsFd],
+        #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
+    ) -> Result<()> {
         use std::{future::poll_fn, task::Poll};
 
         // Convert to BorrowedFd for rustix.
@@ -119,7 +124,13 @@ impl socket::WriteHalf for WriteHalf {
 
             let n: usize = poll_fn(|cx| {
                 loop {
-                    match crate::unix_utils::sendmsg(self.0.as_ref(), &buf[pos..], fds_to_send) {
+                    match crate::unix_utils::sendmsg(
+                        self.0.as_ref(),
+                        &buf[pos..],
+                        fds_to_send,
+                        #[cfg(target_os = "linux")]
+                        creds,
+                    ) {
                         Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             match self.0.poll_writable(cx) {

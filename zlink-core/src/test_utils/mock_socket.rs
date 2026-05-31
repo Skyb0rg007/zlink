@@ -89,6 +89,8 @@ impl Socket for MockSocket {
                 written: Vec::new(),
                 #[cfg(feature = "std")]
                 fds_written: RefCell::new(Vec::new()),
+                #[cfg(all(feature = "std", target_os = "linux"))]
+                credentials_written: Vec::new(),
             },
         )
     }
@@ -208,6 +210,8 @@ pub struct MockWriteHalf {
     written: Vec<u8>,
     #[cfg(feature = "std")]
     fds_written: RefCell<Vec<Vec<OwnedFd>>>,
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    credentials_written: Vec<crate::connection::PassedCredentials>,
 }
 
 impl MockWriteHalf {
@@ -217,6 +221,8 @@ impl MockWriteHalf {
         Self {
             written: Vec::new(),
             fds_written: RefCell::new(Vec::new()),
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            credentials_written: Vec::new(),
         }
     }
 
@@ -236,6 +242,12 @@ impl MockWriteHalf {
     pub fn fd_write_count(&self) -> usize {
         self.fds_written.borrow().len()
     }
+
+    /// All credentials that have been written.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn credentials_written(&self) -> &[crate::connection::PassedCredentials] {
+        &self.credentials_written
+    }
 }
 
 #[cfg(feature = "std")]
@@ -250,6 +262,9 @@ impl WriteHalf for MockWriteHalf {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
     ) -> crate::Result<()> {
         self.written.extend_from_slice(buf);
 
@@ -268,6 +283,18 @@ impl WriteHalf for MockWriteHalf {
                     })
                     .collect::<crate::Result<Vec<_>>>()?;
                 self.fds_written.borrow_mut().push(owned_fds);
+            }
+
+            #[cfg(target_os = "linux")]
+            if let Some(credentials) = credentials {
+                // `PassedCredentials` doesn't implement `Clone`, so reconstruct from its fields.
+                // This is fine for test-only code.
+                self.credentials_written
+                    .push(crate::connection::PassedCredentials::new(
+                        credentials.unix_user_id(),
+                        credentials.unix_primary_group_id(),
+                        credentials.process_id(),
+                    ));
             }
         }
 
@@ -328,6 +355,9 @@ impl WriteHalf for TestWriteHalf {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
     ) -> crate::Result<()> {
         assert_eq!(buf.len(), self.expected_len);
 
@@ -379,6 +409,9 @@ impl WriteHalf for CountingWriteHalf {
         &mut self,
         _buf: &[u8],
         #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
     ) -> crate::Result<()> {
         self.count += 1;
         Ok(())
@@ -421,7 +454,15 @@ mod tests {
         let (r1, _w1) = UnixStream::pair().unwrap();
         let borrowed = r1.as_fd();
 
-        write.write(b"test", &[borrowed]).await.unwrap();
+        write
+            .write(
+                b"test",
+                &[borrowed],
+                #[cfg(target_os = "linux")]
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(write.written_data(), b"test");
         assert_eq!(write.fd_write_count(), 1);
@@ -439,7 +480,15 @@ mod tests {
         let (r2, _w2) = UnixStream::pair().unwrap();
         let borrowed = [r1.as_fd(), r2.as_fd()];
 
-        write.write(b"test", &borrowed).await.unwrap();
+        write
+            .write(
+                b"test",
+                &borrowed,
+                #[cfg(target_os = "linux")]
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(write.write_count(), 1);
     }
@@ -455,7 +504,15 @@ mod tests {
         let borrowed = [r1.as_fd()];
 
         // This should panic because we expect 2 FDs but provide 1.
-        write.write(b"test", &borrowed).await.unwrap();
+        write
+            .write(
+                b"test",
+                &borrowed,
+                #[cfg(target_os = "linux")]
+                None,
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

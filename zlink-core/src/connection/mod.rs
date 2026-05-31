@@ -666,6 +666,14 @@ where
     {
         self.read.received_credentials()
     }
+
+    /// Set the credentials to send with all subsequent writes.
+    ///
+    /// This is only available for `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn set_credentials(&mut self, credentials: Option<PassedCredentials>) {
+        self.write.set_credentials(credentials);
+    }
 }
 
 impl<S> From<S> for Connection<S>

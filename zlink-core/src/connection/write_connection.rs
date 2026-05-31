@@ -28,6 +28,8 @@ pub struct WriteConnection<Write: WriteHalf> {
     id: usize,
     #[cfg(feature = "std")]
     pending_fds: VecDeque<MessageFds>,
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    credentials: Option<crate::connection::PassedCredentials>,
     // On macOS, SCM_RIGHTS does not properly hold a reference to the underlying file description
     // when the sender closes the FD in the same process before the receiver calls `recvmsg`. The
     // receiver ends up with a stale FD. We work around this by keeping sent FDs alive until the
@@ -46,6 +48,8 @@ impl<Write: WriteHalf> WriteConnection<Write> {
             pos: 0,
             #[cfg(feature = "std")]
             pending_fds: VecDeque::new(),
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            credentials: None,
             #[cfg(all(feature = "std", target_os = "macos"))]
             held_fds: VecDeque::new(),
         }
@@ -203,7 +207,12 @@ impl<Write: WriteHalf> WriteConnection<Write> {
                         fd_offset - sent_pos
                     );
                     self.socket
-                        .write(&self.buffer[sent_pos..fd_offset], &[] as &[OwnedFd])
+                        .write(
+                            &self.buffer[sent_pos..fd_offset],
+                            &[] as &[OwnedFd],
+                            #[cfg(target_os = "linux")]
+                            self.credentials.as_ref(),
+                        )
                         .await?;
                 }
 
@@ -221,7 +230,12 @@ impl<Write: WriteHalf> WriteConnection<Write> {
                     fds.len()
                 );
                 self.socket
-                    .write(&self.buffer[fd_offset..msg_end], &fds)
+                    .write(
+                        &self.buffer[fd_offset..msg_end],
+                        &fds,
+                        #[cfg(target_os = "linux")]
+                        self.credentials.as_ref(),
+                    )
                     .await?;
                 sent_pos = msg_end;
 
@@ -242,7 +256,12 @@ impl<Write: WriteHalf> WriteConnection<Write> {
             #[cfg(feature = "std")]
             {
                 self.socket
-                    .write(&self.buffer[sent_pos..self.pos], &[] as &[OwnedFd])
+                    .write(
+                        &self.buffer[sent_pos..self.pos],
+                        &[] as &[OwnedFd],
+                        #[cfg(target_os = "linux")]
+                        self.credentials.as_ref(),
+                    )
                     .await?;
             }
             #[cfg(not(feature = "std"))]
@@ -258,6 +277,14 @@ impl<Write: WriteHalf> WriteConnection<Write> {
     /// The underlying write half of the socket.
     pub fn write_half(&self) -> &Write {
         &self.socket
+    }
+
+    /// Set the credentials to send with all subsequent writes.
+    ///
+    /// This is only available for `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn set_credentials(&mut self, credentials: Option<crate::connection::PassedCredentials>) {
+        self.credentials = credentials;
     }
 
     pub(super) async fn write<T>(
