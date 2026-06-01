@@ -1351,9 +1351,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// // Server setup.
-/// let socket_path = "/tmp/zlink-service-example.sock";
-/// let _ = std::fs::remove_file(socket_path);
-/// let listener = bind(socket_path)?;
+/// let dir = tempfile::tempdir()?;
+/// let socket_path = dir.path().join("service-example.sock");
+/// let listener = bind(&socket_path)?;
 /// let service = BankAccount::new(1000);
 /// let server = Server::new(listener, service);
 ///
@@ -1361,7 +1361,7 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// tokio::select! {
 ///     res = server.run() => res?,
 ///     res = async {
-///         let mut conn = connect(socket_path).await?;
+///         let mut conn = connect(&socket_path).await?;
 ///
 ///         // Check initial balance.
 ///         let balance = conn.get_balance().await?.unwrap();

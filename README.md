@@ -49,7 +49,8 @@ macros:
 
 ```rust
 use serde::{Deserialize, Serialize};
-use tokio::{select, sync::oneshot, fs::remove_file};
+use std::path::Path;
+use tokio::{select, sync::oneshot};
 use zlink::{introspect, proxy, service, unix, ReplyError, Server};
 
 #[tokio::main]
@@ -57,21 +58,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a channel to signal when server is ready.
     let (ready_tx, ready_rx) = oneshot::channel();
 
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("calculator.sock");
+
     // Run server and client concurrently.
     select! {
-        res = run_server(ready_tx) => res?,
-        res = run_client(ready_rx) => res?,
+        res = run_server(&socket_path, ready_tx) => res?,
+        res = run_client(&socket_path, ready_rx) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(ready_rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(
+    socket_path: &Path,
+    ready_rx: oneshot::Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Wait for server to be ready.
     ready_rx.await.map_err(|_| "Server failed to start")?;
 
     // Connect to the calculator service.
-    let mut conn = unix::connect(SOCKET_PATH).await?;
+    let mut conn = unix::connect(socket_path).await?;
 
     // Use the proxy-generated methods.
     let result = conn.add(5.0, 3.0).await?.unwrap();
@@ -149,11 +156,12 @@ enum CalculatorError<'a> {
     },
 }
 
-async fn run_server(ready_tx: oneshot::Sender<()>) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = remove_file(SOCKET_PATH).await;
-
+async fn run_server(
+    socket_path: &Path,
+    ready_tx: oneshot::Sender<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Setup and run the server.
-    let listener = unix::bind(SOCKET_PATH)?;
+    let listener = unix::bind(socket_path)?;
     let server = Server::new(listener, Calculator::new());
 
     // Signal that server is ready.
@@ -216,8 +224,6 @@ impl Calculator {
         }
     }
 }
-
-const SOCKET_PATH: &str = "/tmp/calculator_example.varlink";
 ```
 
 > **Note**: Typically you would want to spawn the server in a separate task but that's not what we
@@ -275,8 +281,12 @@ use zlink::{proxy, unix, ReplyError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Connect to a batch processing service
-    let mut conn = unix::connect("/tmp/batch_processor.varlink").await?;
+    // Connect to a batch processing service in the XDG runtime dir
+    // (e.g. /run/user/1000/batch_processor.varlink).
+    let socket_path = dirs::runtime_dir()
+        .ok_or("XDG_RUNTIME_DIR is not set")?
+        .join("batch_processor.varlink");
+    let mut conn = unix::connect(&socket_path).await?;
 
     // Send multiple pipelined requests without waiting for responses.
     // Note: chain methods are only generated for proxy methods with owned return types.
