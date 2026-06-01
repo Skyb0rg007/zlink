@@ -25,8 +25,8 @@ impl crate::Listener for Listener {
         self.listener
             .accept()
             .await
-            .map(|(stream, _)| Some(super::Stream::from(stream).into()))
             .map_err(Into::into)
+            .and_then(|(stream, _)| super::Stream::try_from(stream).map(Into::into).map(Some))
     }
 }
 

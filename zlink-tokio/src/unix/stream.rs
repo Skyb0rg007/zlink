@@ -19,9 +19,9 @@ where
 {
     UnixStream::connect(path)
         .await
-        .map(Stream)
-        .map(Connection::new)
         .map_err(Into::into)
+        .and_then(TryInto::try_into)
+        .map(Connection::new)
 }
 
 /// The [`Socket`] implementation using Unix Domain Sockets.
@@ -41,9 +41,11 @@ impl Socket for Stream {
     }
 }
 
-impl From<UnixStream> for Stream {
-    fn from(stream: UnixStream) -> Self {
-        Self(stream)
+impl TryFrom<UnixStream> for Stream {
+    type Error = crate::Error;
+
+    fn try_from(stream: UnixStream) -> Result<Self> {
+        Ok(Self(stream))
     }
 }
 
@@ -52,7 +54,9 @@ impl TryFrom<StdUnixStream> for Stream {
 
     fn try_from(stream: StdUnixStream) -> Result<Self> {
         stream.set_nonblocking(true)?;
-        UnixStream::from_std(stream).map(Self).map_err(Into::into)
+        UnixStream::from_std(stream)
+            .map_err(Into::into)
+            .and_then(TryInto::try_into)
     }
 }
 
@@ -188,8 +192,8 @@ mod tests {
         std_a.set_nonblocking(true).unwrap();
         std_b.set_nonblocking(true).unwrap();
 
-        let conn_a = Connection::new(Stream::from(UnixStream::from_std(std_a).unwrap()));
-        let conn_b = Connection::new(Stream::from(UnixStream::from_std(std_b).unwrap()));
+        let conn_a = Connection::new(UnixStream::from_std(std_a).unwrap().try_into().unwrap());
+        let conn_b = Connection::new(UnixStream::from_std(std_b).unwrap().try_into().unwrap());
 
         let (_, mut write_a) = conn_a.split();
         let (mut read_b, _) = conn_b.split();

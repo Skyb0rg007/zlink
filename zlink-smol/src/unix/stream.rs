@@ -22,9 +22,9 @@ where
 {
     Async::<StdUnixStream>::connect(path)
         .await
-        .map(Stream)
-        .map(Connection::new)
         .map_err(Into::into)
+        .and_then(TryInto::try_into)
+        .map(Connection::new)
 }
 
 /// The [`Socket`] implementation using Unix Domain Sockets.
@@ -44,9 +44,11 @@ impl Socket for Stream {
     }
 }
 
-impl From<Async<StdUnixStream>> for Stream {
-    fn from(stream: Async<StdUnixStream>) -> Self {
-        Self(stream)
+impl TryFrom<Async<StdUnixStream>> for Stream {
+    type Error = crate::Error;
+
+    fn try_from(stream: Async<StdUnixStream>) -> Result<Self> {
+        Ok(Self(stream))
     }
 }
 
@@ -55,7 +57,7 @@ impl TryFrom<StdUnixStream> for Stream {
 
     fn try_from(stream: StdUnixStream) -> Result<Self> {
         stream.set_nonblocking(true)?;
-        Ok(Self(Async::new(stream)?))
+        Async::new(stream)?.try_into()
     }
 }
 
