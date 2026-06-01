@@ -45,6 +45,8 @@ impl TryFrom<UnixStream> for Stream {
     type Error = crate::Error;
 
     fn try_from(stream: UnixStream) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        zlink_core::unix_utils::enable_passcred(&stream)?;
         Ok(Self(stream))
     }
 }

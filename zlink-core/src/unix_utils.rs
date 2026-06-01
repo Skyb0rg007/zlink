@@ -57,6 +57,15 @@ pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<ReadResult> {
         .map_err(io::Error::from)
 }
 
+/// Enable receiving of peer credentials (`SO_PASSCRED`) on the given unix socket.
+///
+/// Without this, the kernel discards any `SCM_CREDENTIALS` ancillary data sent by the peer.
+#[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub fn enable_passcred(fd: impl AsFd) -> io::Result<()> {
+    rustix::net::sockopt::set_socket_passcred(fd.as_fd(), true).map_err(io::Error::from)
+}
+
 /// Send a message to a Unix socket, including any file descriptors.
 ///
 /// This is a low-level helper that performs the `sendmsg` syscall.
