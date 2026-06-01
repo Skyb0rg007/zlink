@@ -68,3 +68,53 @@ async fn peer_credentials_unix_socket() {
 
     let _stream = connect_task.await.unwrap();
 }
+
+/// Verify that explicitly-set credentials are sent via `SCM_CREDENTIALS` and received on the peer.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn passed_credentials_over_unix_socket() {
+    use serde::{Deserialize, Serialize};
+    use serde_prefix_all::prefix_all;
+    use zlink::{Call, connection::PassedCredentials};
+
+    #[prefix_all("org.example.")]
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(tag = "method", content = "parameters")]
+    enum Method {
+        Ping,
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("passed_creds.sock");
+
+    let mut listener = zlink::unix::bind(&socket_path).unwrap();
+
+    let socket_path_clone = socket_path.clone();
+    let client_task = tokio::spawn(async move {
+        let mut client = zlink::unix::connect(&socket_path_clone).await.unwrap();
+
+        let creds = PassedCredentials::new(
+            rustix::process::getuid(),
+            rustix::process::getgid(),
+            rustix::process::getpid(),
+        );
+        client.set_credentials(Some(creds));
+
+        client
+            .send_call(&Call::new(Method::Ping), vec![])
+            .await
+            .unwrap();
+    });
+
+    let mut server = listener.accept().await.unwrap().unwrap();
+    let _ = server.receive_call::<Method>().await.unwrap();
+
+    let received = server
+        .received_credentials()
+        .expect("credentials should be received");
+    assert_eq!(received.unix_user_id(), rustix::process::getuid());
+    assert_eq!(received.unix_primary_group_id(), rustix::process::getgid());
+    assert_eq!(received.process_id(), rustix::process::getpid());
+
+    client_task.await.unwrap();
+}
