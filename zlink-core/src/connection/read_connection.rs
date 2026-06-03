@@ -2,6 +2,8 @@
 
 use core::{fmt::Debug, str::from_utf8_unchecked};
 
+#[cfg(all(feature = "std", target_os = "linux"))]
+use crate::connection::PassedCredentials;
 use crate::{Result, varlink_service};
 
 use super::{
@@ -43,6 +45,8 @@ pub struct ReadConnection<Read: ReadHalf> {
     // `WriteConnection::held_fds` on macOS. See that field's comment for details.
     #[cfg(all(feature = "std", target_os = "macos"))]
     pub(super) fd_recvs: usize,
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    received_credentials: Option<std::sync::Arc<PassedCredentials>>,
 }
 
 impl<Read: ReadHalf> ReadConnection<Read> {
@@ -58,6 +62,8 @@ impl<Read: ReadHalf> ReadConnection<Read> {
             pending_fds: VecDeque::new(),
             #[cfg(all(feature = "std", target_os = "macos"))]
             fd_recvs: 0,
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            received_credentials: None,
         }
     }
 
@@ -196,18 +202,21 @@ impl<Read: ReadHalf> ReadConnection<Read> {
         }
 
         loop {
-            #[cfg(feature = "std")]
-            let (bytes_read, fds) = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
-            #[cfg(not(feature = "std"))]
-            let bytes_read = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            let result = self.socket.read(&mut self.buffer[self.read_pos..]).await?;
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            let mut result = result;
 
-            if bytes_read == 0 {
+            if result.bytes_read() == 0 {
                 return Err(crate::Error::UnexpectedEof);
             }
-            self.read_pos += bytes_read;
+            self.read_pos += result.bytes_read();
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            if let Some(creds) = result.take_credentials() {
+                self.received_credentials = Some(std::sync::Arc::new(creds));
+            }
             #[cfg(feature = "std")]
-            if !fds.is_empty() {
-                self.pending_fds.push_back(fds);
+            if !result.fds().is_empty() {
+                self.pending_fds.push_back(result.into_fds());
                 // Track receipt so `Connection` can drain `WriteConnection::held_fds`.
                 #[cfg(target_os = "macos")]
                 {
@@ -240,5 +249,14 @@ impl<Read: ReadHalf> ReadConnection<Read> {
     /// The underlying read half of the socket.
     pub fn read_half(&self) -> &Read {
         &self.socket
+    }
+
+    /// The credentials passed through over the socket with the latest message (if any).
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn received_credentials(&self) -> Option<&std::sync::Arc<PassedCredentials>>
+    where
+        Read: super::socket::UnixSocket,
+    {
+        self.received_credentials.as_ref()
     }
 }

@@ -5,20 +5,6 @@ use core::future::Future;
 #[cfg(feature = "std")]
 use std::os::fd::{AsFd, OwnedFd};
 
-/// Result type for [`ReadHalf::read`] operations.
-///
-/// With `std` feature: returns `(usize, Vec<OwnedFd>)` - bytes read and file descriptors.
-/// Without `std` feature: returns `usize` - just bytes read.
-#[cfg(feature = "std")]
-pub type ReadResult = (usize, alloc::vec::Vec<OwnedFd>);
-
-/// Result type for [`ReadHalf::read`] operations.
-///
-/// With `std` feature: returns `(usize, Vec<OwnedFd>)` - bytes read and file descriptors.
-/// Without `std` feature: returns `usize` - just bytes read.
-#[cfg(not(feature = "std"))]
-pub type ReadResult = usize;
-
 /// The socket trait.
 ///
 /// This is the trait that needs to be implemented for a type to be used as a socket/transport.
@@ -65,6 +51,9 @@ pub trait WriteHalf: core::fmt::Debug {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] fds: &[impl AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] credentials: Option<
+            &crate::connection::PassedCredentials,
+        >,
     ) -> impl Future<Output = crate::Result<()>>;
 }
 
@@ -139,8 +128,110 @@ pub mod impl_for_doc {
             &mut self,
             _buf: &[u8],
             #[cfg(feature = "std")] _fds: &[impl super::AsFd],
+            #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+                &crate::connection::PassedCredentials,
+            >,
         ) -> crate::Result<()> {
             unreachable!("This is only for doc tests")
         }
+    }
+}
+
+/// Result type for [`ReadHalf::read`] operations.
+#[derive(Debug)]
+pub struct ReadResult {
+    /// The number of bytes read.
+    bytes_read: usize,
+    /// The file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    fds: alloc::vec::Vec<OwnedFd>,
+    /// The credentials received, if any. This is only available with the `std` feature and `linux`
+    /// target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    credentials: Option<crate::connection::PassedCredentials>,
+}
+
+impl ReadResult {
+    /// Creates a new `ReadResult` with the given number of bytes read.
+    #[doc(hidden)]
+    pub fn new(bytes_read: usize) -> Self {
+        Self {
+            bytes_read,
+            #[cfg(feature = "std")]
+            fds: vec![],
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            credentials: None,
+        }
+    }
+
+    /// The number of bytes read.
+    pub fn bytes_read(&self) -> usize {
+        self.bytes_read
+    }
+
+    /// The file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn fds(&self) -> &[OwnedFd] {
+        &self.fds
+    }
+
+    /// The credentials received, if any. This is only available with the `std` feature and `linux`
+    /// target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn credentials(&self) -> Option<&crate::connection::PassedCredentials> {
+        self.credentials.as_ref()
+    }
+
+    /// Sets the file descriptors received, if any. This is only available with the `std` feature.
+    #[cfg(feature = "std")]
+    #[doc(hidden)]
+    pub fn set_fds<F>(mut self, fds: F) -> Self
+    where
+        F: Into<alloc::vec::Vec<OwnedFd>>,
+    {
+        self.fds = fds.into();
+
+        self
+    }
+
+    /// Sets the credentials received, if any. This is only available with the `std` feature and
+    /// `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    #[doc(hidden)]
+    pub fn set_credentials(
+        mut self,
+        credentials: Option<crate::connection::PassedCredentials>,
+    ) -> Self {
+        self.credentials = credentials;
+
+        self
+    }
+
+    /// Takes the file descriptors received, leaving an empty list in their place. This is only
+    /// available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn take_fds(&mut self) -> alloc::vec::Vec<OwnedFd> {
+        core::mem::take(&mut self.fds)
+    }
+
+    /// Consumes this `ReadResult` and returns the file descriptors received, if any. This is only
+    /// available with the `std` feature.
+    #[cfg(feature = "std")]
+    pub fn into_fds(self) -> alloc::vec::Vec<OwnedFd> {
+        self.fds
+    }
+
+    /// Takes the credentials received, leaving `None` in their place. This is only available with
+    /// the `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn take_credentials(&mut self) -> Option<crate::connection::PassedCredentials> {
+        self.credentials.take()
+    }
+
+    /// Consumes this `ReadResult` and returns the credentials received, if any. This is only
+    /// available with the `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn into_credentials(self) -> Option<crate::connection::PassedCredentials> {
+        self.credentials
     }
 }

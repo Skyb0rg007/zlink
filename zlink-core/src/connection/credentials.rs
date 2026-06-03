@@ -5,11 +5,9 @@ use super::{Gid, Pid, Uid};
 /// Credentials of a peer connection.
 #[derive(Debug)]
 pub struct Credentials {
-    unix_user_id: Uid,
-    unix_primary_group_id: Gid,
+    basic: PassedCredentials,
     #[cfg(target_os = "linux")]
     unix_supplementary_group_ids: Vec<Gid>,
-    process_id: Pid,
     #[cfg(target_os = "linux")]
     process_fd: std::os::fd::OwnedFd,
 }
@@ -17,18 +15,14 @@ pub struct Credentials {
 impl Credentials {
     /// Create new credentials for a peer connection.
     pub(crate) fn new(
-        unix_user_id: Uid,
-        unix_primary_group_id: Gid,
+        basic: PassedCredentials,
         #[cfg(target_os = "linux")] unix_supplementary_group_ids: Vec<Gid>,
-        process_id: Pid,
         #[cfg(target_os = "linux")] process_fd: std::os::fd::OwnedFd,
     ) -> Self {
         Self {
-            unix_user_id,
-            unix_primary_group_id,
+            basic,
             #[cfg(target_os = "linux")]
             unix_supplementary_group_ids,
-            process_id,
             #[cfg(target_os = "linux")]
             process_fd,
         }
@@ -36,19 +30,19 @@ impl Credentials {
 
     /// The numeric Unix user ID, as defined by POSIX.
     pub fn unix_user_id(&self) -> Uid {
-        self.unix_user_id
+        self.basic.unix_user_id
     }
 
     /// The numeric process ID, on platforms that have this concept.
     ///
     /// On Unix, this is the process ID defined by POSIX.
     pub fn process_id(&self) -> Pid {
-        self.process_id
+        self.basic.process_id
     }
 
     /// The numeric Unix group ID, as defined by POSIX.
     pub fn unix_primary_group_id(&self) -> Gid {
-        self.unix_primary_group_id
+        self.basic.unix_primary_group_id
     }
 
     /// The set of numeric supplementary Unix group IDs, as defined by POSIX.
@@ -70,5 +64,41 @@ impl Credentials {
         use std::os::fd::AsFd;
 
         self.process_fd.as_fd()
+    }
+}
+
+/// Credentials passed over of socket.
+#[derive(Debug)]
+pub struct PassedCredentials {
+    unix_user_id: Uid,
+    unix_primary_group_id: Gid,
+    process_id: Pid,
+}
+
+impl PassedCredentials {
+    /// Create a new `PassedCredentials` instance.
+    pub fn new(unix_user_id: Uid, unix_primary_group_id: Gid, process_id: Pid) -> Self {
+        Self {
+            unix_user_id,
+            unix_primary_group_id,
+            process_id,
+        }
+    }
+
+    /// The numeric Unix user ID, as defined by POSIX.
+    pub fn unix_user_id(&self) -> Uid {
+        self.unix_user_id
+    }
+
+    /// The numeric process ID, on platforms that have this concept.
+    ///
+    /// On Unix, this is the process ID defined by POSIX.
+    pub fn process_id(&self) -> Pid {
+        self.process_id
+    }
+
+    /// The numeric Unix group ID, as defined by POSIX.
+    pub fn unix_primary_group_id(&self) -> Gid {
+        self.unix_primary_group_id
     }
 }

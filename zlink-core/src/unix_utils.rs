@@ -4,47 +4,85 @@
 //! runtime-specific socket implementations.
 
 use core::mem::MaybeUninit;
+#[cfg(target_os = "linux")]
+use std::os::fd::OwnedFd;
 use std::{
     io,
-    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::fd::{AsFd, BorrowedFd},
 };
 
-use crate::connection::Credentials;
+use crate::connection::{Credentials, PassedCredentials, socket::ReadResult};
 
 /// Receive a message from a Unix socket, including any file descriptors.
 ///
 /// This is a low-level helper that performs the `recvmsg` syscall.
 #[doc(hidden)]
-pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<(usize, alloc::vec::Vec<OwnedFd>)> {
+pub fn recvmsg(fd: impl AsFd, buf: &mut [u8]) -> io::Result<ReadResult> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
     use std::io::IoSliceMut;
 
+    #[cfg(target_os = "linux")]
+    let mut cmsg_buf =
+        [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS), ScmCredentials(1))];
+    #[cfg(not(target_os = "linux"))]
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut control = RecvAncillaryBuffer::new(&mut cmsg_buf);
 
     let mut iov = [IoSliceMut::new(buf)];
     recvmsg(fd.as_fd(), &mut iov, &mut control, RecvFlags::empty())
         .map(|msg| {
-            // Extract file descriptors from ancillary data.
+            // Extract file descriptors and credentials from ancillary data.
             let mut fds = alloc::vec::Vec::new();
+            #[cfg(target_os = "linux")]
+            let mut creds = None;
             for m in control.drain() {
-                if let RecvAncillaryMessage::ScmRights(rights) = m {
-                    fds.extend(rights);
+                match m {
+                    RecvAncillaryMessage::ScmRights(rights) => fds.extend(rights),
+                    #[cfg(target_os = "linux")]
+                    RecvAncillaryMessage::ScmCredentials(ucreds) => {
+                        creds = Some(PassedCredentials::new(ucreds.uid, ucreds.gid, ucreds.pid));
+                    }
+                    // Ignore the rest (currently non on Linux).
+                    _ => (),
                 }
             }
-            (msg.bytes, fds)
+            let result = ReadResult::new(msg.bytes);
+            #[cfg(feature = "std")]
+            let result = result.set_fds(fds);
+            #[cfg(all(feature = "std", target_os = "linux"))]
+            let result = result.set_credentials(creds);
+
+            result
         })
         .map_err(io::Error::from)
+}
+
+/// Enable receiving of peer credentials (`SO_PASSCRED`) on the given unix socket.
+///
+/// Without this, the kernel discards any `SCM_CREDENTIALS` ancillary data sent by the peer.
+#[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub fn enable_passcred(fd: impl AsFd) -> io::Result<()> {
+    rustix::net::sockopt::set_socket_passcred(fd.as_fd(), true).map_err(io::Error::from)
 }
 
 /// Send a message to a Unix socket, including any file descriptors.
 ///
 /// This is a low-level helper that performs the `sendmsg` syscall.
 #[doc(hidden)]
-pub fn sendmsg(fd: impl AsFd, buf: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<usize> {
+pub fn sendmsg(
+    fd: impl AsFd,
+    buf: &[u8],
+    fds: &[BorrowedFd<'_>],
+    #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
+) -> io::Result<usize> {
     use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
     use std::io::IoSlice;
 
+    #[cfg(target_os = "linux")]
+    let mut cmsg_buf =
+        [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS), ScmCredentials(1))];
+    #[cfg(not(target_os = "linux"))]
     let mut cmsg_buf = [MaybeUninit::<u8>::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS))];
     let mut control = SendAncillaryBuffer::new(&mut cmsg_buf);
 
@@ -53,6 +91,21 @@ pub fn sendmsg(fd: impl AsFd, buf: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<
             io::ErrorKind::InvalidInput,
             "too many file descriptors to send",
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Some(creds) = creds {
+        let ucred = rustix::net::UCred {
+            pid: creds.process_id(),
+            uid: creds.unix_user_id(),
+            gid: creds.unix_primary_group_id(),
+        };
+        if !control.push(SendAncillaryMessage::ScmCredentials(ucred)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to push credentials",
+            ));
+        }
     }
 
     let iov = [IoSlice::new(buf)];
@@ -79,6 +132,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     {
         use std::os::fd::FromRawFd;
+
         // Get SO_PEERCRED (uid, gid, pid).
         let ucred = rustix::net::sockopt::socket_peercred(fd)?;
         let uid = ucred.uid;
@@ -168,9 +222,13 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         };
 
         #[cfg(target_os = "android")]
-        let creds = Credentials::new(uid, primary_gid, pid);
+        let creds = Credentials::new(PassedCredentials::new(uid, primary_gid, pid));
         #[cfg(target_os = "linux")]
-        let creds = Credentials::new(uid, primary_gid, supplementary_gids, pid, process_fd);
+        let creds = Credentials::new(
+            PassedCredentials::new(uid, primary_gid, pid),
+            supplementary_gids,
+            process_fd,
+        );
 
         Ok(creds)
     }
@@ -291,7 +349,7 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
         #[cfg(any(target_os = "freebsd", target_os = "dragonfly"))]
         let pid = rustix::process::Pid::from_raw(0).unwrap();
 
-        Ok(Credentials::new(uid, gid, pid))
+        Ok(Credentials::new(PassedCredentials::new(uid, gid, pid)))
     }
 
     #[cfg(not(any(

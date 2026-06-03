@@ -26,7 +26,7 @@ impl crate::Listener for Listener {
 
     async fn accept(&mut self) -> Result<Option<Connection<Self::Socket>>> {
         let (stream, _) = self.listener.accept().await?;
-        Ok(Some(super::Stream::from(stream).into()))
+        Ok(Some(super::Stream::try_from(stream)?.into()))
     }
 }
 

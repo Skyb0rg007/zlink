@@ -47,6 +47,8 @@ mod credentials;
 mod read_connection;
 #[cfg(feature = "std")]
 pub use credentials::Credentials;
+#[cfg(feature = "std")]
+pub use credentials::PassedCredentials;
 pub use read_connection::ReadConnection;
 #[cfg(feature = "std")]
 pub use rustix::{process::Gid, process::Pid, process::Uid};
@@ -654,6 +656,23 @@ where
         // Safety: `unwrap` won't panic because we ensure above that it's set correctly if the
         // method doesn't error out.
         Ok(self.credentials.as_ref().unwrap())
+    }
+
+    /// The credentials passed through over the socket with the latest message (if any).
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn received_credentials(&self) -> Option<&std::sync::Arc<PassedCredentials>>
+    where
+        S::ReadHalf: socket::UnixSocket,
+    {
+        self.read.received_credentials()
+    }
+
+    /// Set the credentials to send with all subsequent writes.
+    ///
+    /// This is only available for `std` feature and `linux` target.
+    #[cfg(all(feature = "std", target_os = "linux"))]
+    pub fn set_credentials(&mut self, credentials: Option<PassedCredentials>) {
+        self.write.set_credentials(credentials);
     }
 }
 

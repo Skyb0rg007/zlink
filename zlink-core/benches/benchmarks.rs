@@ -407,10 +407,7 @@ impl ReadHalf for BiPipeReadHalf {
             let to_read = (self.buffer.len() - self.pos).min(buf.len());
             buf[..to_read].copy_from_slice(&self.buffer[self.pos..self.pos + to_read]);
             self.pos += to_read;
-            #[cfg(feature = "std")]
-            return Ok((to_read, vec![]));
-            #[cfg(not(feature = "std"))]
-            return Ok(to_read);
+            return Ok(zlink_core::connection::socket::ReadResult::new(to_read));
         }
 
         // Otherwise, wait for new data.
@@ -421,16 +418,11 @@ impl ReadHalf for BiPipeReadHalf {
                 let to_read = self.buffer.len().min(buf.len());
                 buf[..to_read].copy_from_slice(&self.buffer[..to_read]);
                 self.pos = to_read;
-                #[cfg(feature = "std")]
-                return Ok((to_read, vec![]));
-                #[cfg(not(feature = "std"))]
-                return Ok(to_read);
+                return Ok(zlink_core::connection::socket::ReadResult::new(to_read));
             }
             None => {
-                #[cfg(feature = "std")]
-                return Ok((0, vec![])); // Connection closed.
-                #[cfg(not(feature = "std"))]
-                return Ok(0); // Connection closed.
+                // Connection closed.
+                return Ok(zlink_core::connection::socket::ReadResult::new(0));
             }
         }
     }
@@ -446,6 +438,9 @@ impl WriteHalf for BiPipeWriteHalf {
         &mut self,
         buf: &[u8],
         #[cfg(feature = "std")] _fds: &[impl std::os::fd::AsFd],
+        #[cfg(all(feature = "std", target_os = "linux"))] _credentials: Option<
+            &zlink_core::connection::PassedCredentials,
+        >,
     ) -> zlink_core::Result<()> {
         self.sender
             .send(buf.to_vec())

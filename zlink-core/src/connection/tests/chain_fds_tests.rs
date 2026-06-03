@@ -415,8 +415,20 @@ struct TrackingWriteHalf {
 }
 
 impl WriteHalf for TrackingWriteHalf {
-    async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> Result<()> {
-        self.mock.write(buf, fds).await
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        fds: &[impl AsFd],
+        #[cfg(target_os = "linux")] credentials: Option<&crate::connection::PassedCredentials>,
+    ) -> Result<()> {
+        self.mock
+            .write(
+                buf,
+                fds,
+                #[cfg(target_os = "linux")]
+                credentials,
+            )
+            .await
     }
 }
 
@@ -435,7 +447,12 @@ struct WriteOperationTracker {
 }
 
 impl WriteHalf for WriteOperationTracker {
-    async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> Result<()> {
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        fds: &[impl AsFd],
+        #[cfg(target_os = "linux")] credentials: Option<&crate::connection::PassedCredentials>,
+    ) -> Result<()> {
         // Record this write operation.
         self.operations.push(WriteOperation {
             data: buf.to_vec(),
@@ -443,6 +460,13 @@ impl WriteHalf for WriteOperationTracker {
         });
 
         // Also write to the mock for actual functionality.
-        self.mock.write(buf, fds).await
+        self.mock
+            .write(
+                buf,
+                fds,
+                #[cfg(target_os = "linux")]
+                credentials,
+            )
+            .await
     }
 }

@@ -633,8 +633,22 @@ mod tests {
         }
 
         impl WriteHalf for TrackingWriteHalf {
-            async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> crate::Result<()> {
-                self.mock.write(buf, fds).await
+            async fn write(
+                &mut self,
+                buf: &[u8],
+                fds: &[impl AsFd],
+                #[cfg(target_os = "linux")] credentials: Option<
+                    &crate::connection::PassedCredentials,
+                >,
+            ) -> crate::Result<()> {
+                self.mock
+                    .write(
+                        buf,
+                        fds,
+                        #[cfg(target_os = "linux")]
+                        credentials,
+                    )
+                    .await
             }
         }
 

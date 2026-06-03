@@ -7,5 +7,7 @@ mod chain_fds_tests;
 mod connection_tests;
 #[cfg(feature = "std")]
 mod read_connection_fds_tests;
+#[cfg(all(feature = "std", target_os = "linux"))]
+mod write_connection_credentials_tests;
 #[cfg(feature = "std")]
 mod write_connection_fds_tests;

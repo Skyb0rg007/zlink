@@ -3,10 +3,11 @@ use crate::{
     connection::socket::{self, Socket},
 };
 use std::os::{
-    fd::{AsFd, BorrowedFd, OwnedFd},
+    fd::{AsFd, BorrowedFd},
     unix::net::UnixStream as StdUnixStream,
 };
 use tokio::net::{UnixStream, unix};
+use zlink_core::connection::socket::ReadResult;
 
 /// The connection type that uses Unix Domain Sockets for transport.
 pub type Connection = crate::Connection<Stream>;
@@ -18,9 +19,9 @@ where
 {
     UnixStream::connect(path)
         .await
-        .map(Stream)
-        .map(Connection::new)
         .map_err(Into::into)
+        .and_then(TryInto::try_into)
+        .map(Connection::new)
 }
 
 /// The [`Socket`] implementation using Unix Domain Sockets.
@@ -40,9 +41,13 @@ impl Socket for Stream {
     }
 }
 
-impl From<UnixStream> for Stream {
-    fn from(stream: UnixStream) -> Self {
-        Self(stream)
+impl TryFrom<UnixStream> for Stream {
+    type Error = crate::Error;
+
+    fn try_from(stream: UnixStream) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        zlink_core::unix_utils::enable_passcred(&stream)?;
+        Ok(Self(stream))
     }
 }
 
@@ -51,7 +56,9 @@ impl TryFrom<StdUnixStream> for Stream {
 
     fn try_from(stream: StdUnixStream) -> Result<Self> {
         stream.set_nonblocking(true)?;
-        UnixStream::from_std(stream).map(Self).map_err(Into::into)
+        UnixStream::from_std(stream)
+            .map_err(Into::into)
+            .and_then(TryInto::try_into)
     }
 }
 
@@ -68,7 +75,7 @@ impl AsFd for Stream {
 pub struct ReadHalf(unix::OwnedReadHalf);
 
 impl socket::ReadHalf for ReadHalf {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Vec<OwnedFd>)> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<ReadResult> {
         use std::{future::poll_fn, task::Poll};
 
         poll_fn(|cx| {
@@ -105,7 +112,12 @@ impl socket::UnixSocket for ReadHalf {}
 pub struct WriteHalf(unix::OwnedWriteHalf);
 
 impl socket::WriteHalf for WriteHalf {
-    async fn write(&mut self, buf: &[u8], fds: &[impl AsFd]) -> Result<()> {
+    async fn write(
+        &mut self,
+        buf: &[u8],
+        fds: &[impl AsFd],
+        #[cfg(target_os = "linux")] creds: Option<&crate::connection::PassedCredentials>,
+    ) -> Result<()> {
         use std::{future::poll_fn, task::Poll};
 
         // Convert to BorrowedFd for rustix.
@@ -120,7 +132,13 @@ impl socket::WriteHalf for WriteHalf {
                 loop {
                     let stream: &UnixStream = self.0.as_ref();
                     match stream.try_io(tokio::io::Interest::WRITABLE, || {
-                        crate::unix_utils::sendmsg(stream, &buf[pos..], fds_to_send)
+                        crate::unix_utils::sendmsg(
+                            stream,
+                            &buf[pos..],
+                            fds_to_send,
+                            #[cfg(target_os = "linux")]
+                            creds,
+                        )
                     }) {
                         Ok(bytes_sent) => return Poll::Ready(Ok::<_, crate::Error>(bytes_sent)),
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -176,8 +194,8 @@ mod tests {
         std_a.set_nonblocking(true).unwrap();
         std_b.set_nonblocking(true).unwrap();
 
-        let conn_a = Connection::new(Stream::from(UnixStream::from_std(std_a).unwrap()));
-        let conn_b = Connection::new(Stream::from(UnixStream::from_std(std_b).unwrap()));
+        let conn_a = Connection::new(UnixStream::from_std(std_a).unwrap().try_into().unwrap());
+        let conn_b = Connection::new(UnixStream::from_std(std_b).unwrap().try_into().unwrap());
 
         let (_, mut write_a) = conn_a.split();
         let (mut read_b, _) = conn_b.split();
