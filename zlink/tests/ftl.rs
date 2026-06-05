@@ -18,13 +18,8 @@ use zlink::{
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn ftl() -> Result<(), Box<dyn std::error::Error>> {
-    // Remove the socket file if it exists (from a previous run of this test).
-    if let Err(e) = tokio::fs::remove_file(SOCKET_PATH).await {
-        // It's OK if the file doesn't exist.
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join(SOCKET_FILE);
 
     // The transitions between the drive conditions.
     let conditions = [
@@ -43,25 +38,28 @@ async fn ftl() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // Setup the server and run it in a separate task.
-    let listener = bind(SOCKET_PATH).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let service = Ftl::new(conditions[0]);
     let server = zlink::Server::new(listener, service);
     select! {
         res = server.run() => res?,
-        res = run_client(&conditions) => res?,
+        res = run_client(&socket_path, &conditions) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(conditions: &[DriveCondition]) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(
+    socket_path: &std::path::Path,
+    conditions: &[DriveCondition],
+) -> Result<(), Box<dyn std::error::Error>> {
     // Now create a client connection that monitors changes in the drive condition.
-    let mut conn = connect(SOCKET_PATH).await?;
+    let mut conn = connect(socket_path).await?;
     let mut drive_monitor_stream = pin!(conn.get_drive_condition().await?);
 
     // And a client that only calls methods.
     {
-        let mut conn = connect(SOCKET_PATH).await?;
+        let mut conn = connect(socket_path).await?;
 
         // Let's start with some introspection.
         let info = conn.get_info().await?.map_err(|e| e.to_string())?;
@@ -513,8 +511,7 @@ async fn reply_error_derive_works() {
 // Constants
 // ============================================================================
 
-const SOCKET_PATH: &str = "/tmp/zlink-ftl.sock";
-
+const SOCKET_FILE: &str = "zlink-ftl.sock";
 const VENDOR: &str = "The FL project";
 const PRODUCT: &str = "FTL-capable Spaceship \u{1F680}";
 const VERSION: &str = "1";

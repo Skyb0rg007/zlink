@@ -13,24 +13,20 @@ use zlink::{
 
 #[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn streaming_errors() -> Result<(), Box<dyn std::error::Error>> {
-    let socket_path = "/tmp/zlink-service-macro-streaming-errors-test.sock";
-    if let Err(e) = tokio::fs::remove_file(socket_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    let dir = tempfile::tempdir()?;
+    let socket_path = dir.path().join("test.sock");
 
-    let listener = bind(socket_path).unwrap();
+    let listener = bind(&socket_path).unwrap();
     let server = Server::new(listener, CountingService);
     tokio::select! {
         res = server.run() => res?,
-        res = run_client(socket_path) => res?,
+        res = run_client(&socket_path) => res?,
     }
 
     Ok(())
 }
 
-async fn run_client(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = connect(socket_path).await?;
 
     // First call: `to = 3`, expect three success ticks then end-of-stream.
