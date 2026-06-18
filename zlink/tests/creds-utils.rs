@@ -66,7 +66,11 @@ fn is_pid_valid(actual: Pid, expected: Pid) -> bool {
 pub fn verify_pidfd(creds: &Credentials) -> Result<(), &'static str> {
     use std::os::fd::{AsFd, AsRawFd};
 
-    let fd_num = creds.process_fd().as_fd().as_raw_fd();
+    let fd_num = creds
+        .process_fd()
+        .ok_or("No Process FD")?
+        .as_fd()
+        .as_raw_fd();
     if fd_num < 0 {
         return Err("Process FD is invalid");
     }

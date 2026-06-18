@@ -9,7 +9,7 @@ pub struct Credentials {
     #[cfg(target_os = "linux")]
     unix_supplementary_group_ids: Vec<Gid>,
     #[cfg(target_os = "linux")]
-    process_fd: std::os::fd::OwnedFd,
+    process_fd: Option<std::os::fd::OwnedFd>,
 }
 
 impl Credentials {
@@ -17,7 +17,7 @@ impl Credentials {
     pub(crate) fn new(
         basic: PassedCredentials,
         #[cfg(target_os = "linux")] unix_supplementary_group_ids: Vec<Gid>,
-        #[cfg(target_os = "linux")] process_fd: std::os::fd::OwnedFd,
+        #[cfg(target_os = "linux")] process_fd: Option<std::os::fd::OwnedFd>,
     ) -> Self {
         Self {
             basic,
@@ -59,11 +59,13 @@ impl Credentials {
     /// to identify a process than the ProcessID, as the latter is subject to re-use attacks, while
     /// the FD cannot be recycled. If the original process no longer exists the FD will no longer
     /// be resolvable.
+    /// The SO_PEERPIDFD socket option was added to Linux in version 6.5. This method will return
+    /// None on older kernel versions.
     #[cfg(target_os = "linux")]
-    pub fn process_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+    pub fn process_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
         use std::os::fd::AsFd;
 
-        self.process_fd.as_fd()
+        self.process_fd.as_ref().map(|fd| fd.as_fd())
     }
 }
 

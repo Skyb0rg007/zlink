@@ -119,7 +119,7 @@ pub fn sendmsg(
 /// # Platform Support
 ///
 /// - **Linux/Android**: Uses `SO_PEERCRED` to get uid and pid. On Linux, also gets `SO_PEERPIDFD`
-///   for process FD (falls back to `pidfd_open` if not available).
+///   for process FD.
 /// - **macOS/iOS**: Uses `getpeereid()` for uid and `LOCAL_PEERPID` for pid.
 /// - **OpenBSD**: Uses `getpeereid()` for uid and `SO_PEERCRED` for pid.
 /// - **NetBSD**: Uses `getpeereid()` for uid and `LOCAL_PEEREID` for pid.
@@ -209,15 +209,15 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
             // `getsockopt` returns `0` on success or `-1` on error.
             if ret == 0 {
                 let pidfd = unsafe { pidfd.assume_init() };
-                unsafe { OwnedFd::from_raw_fd(pidfd) }
+                Some(unsafe { OwnedFd::from_raw_fd(pidfd) })
             } else {
                 let err = io::Error::last_os_error();
                 // ENOPROTOOPT means the kernel doesn't support this feature.
                 if err.raw_os_error() != Some(libc::ENOPROTOOPT) {
                     return Err(err);
                 }
-                // If SO_PEERPIDFD is not supported, we fall back to using pidfd_open.
-                rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?
+                // No error, but SO_PEERPIDFD is not supported
+                None
             }
         };
 

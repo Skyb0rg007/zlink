@@ -184,13 +184,10 @@ impl connection::socket::FetchPeerCredentials for MockReadHalf {
 
         #[cfg(target_os = "linux")]
         {
-            use rustix::process::PidfdFlags;
-
-            let process_fd = rustix::process::pidfd_open(pid, PidfdFlags::empty())?;
             Ok(connection::Credentials::new(
                 connection::PassedCredentials::new(uid, gid, pid),
                 vec![],
-                process_fd,
+                None,
             ))
         }
 
