@@ -5,7 +5,7 @@ use syn::{DataEnum, Error, Fields, FieldsNamed, FieldsUnnamed};
 use crate::utils;
 
 /// Generate comment objects from a list of comments.
-pub(super) fn generate_comment_objects(
+pub(crate) fn generate_comment_objects(
     comments: &[String],
     crate_path: &TokenStream2,
 ) -> Vec<TokenStream2> {

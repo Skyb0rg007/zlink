@@ -88,6 +88,46 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         }
     }
 
+    // Verify method doc-comments are propagated through the full round-trip
+    // (compile-time constant → IDL text → parse).
+    for method in interface.methods() {
+        let comment_text: Vec<_> = method.comments().map(|c| c.content()).collect();
+        match method.name() {
+            "GetBalance" => {
+                assert_eq!(comment_text, ["Get the current account balance."]);
+            }
+            "Deposit" => {
+                assert_eq!(comment_text, ["Deposit funds into the account."]);
+            }
+            "Withdraw" => {
+                // Multi-line doc-comment: the blank `///` line survives
+                // the round-trip as an empty comment.
+                assert_eq!(
+                    comment_text,
+                    [
+                        "Withdraw funds from the account.",
+                        "",
+                        "Returns an error if the balance is insufficient."
+                    ]
+                );
+            }
+            "LockAccount" => {
+                assert_eq!(
+                    comment_text,
+                    ["Lock the account to prevent further transactions."]
+                );
+            }
+            x => panic!("Unknown method: {x}"),
+        }
+    }
+
+    // Verify interface-level doc-comments are propagated.
+    let interface_comments: Vec<_> = interface.comments().map(|c| c.content()).collect();
+    assert_eq!(
+        interface_comments,
+        ["A simple bank account service for testing."]
+    );
+
     // Verify the interface contains exactly the expected errors.
     let error_names: Vec<_> = interface.errors().map(|e| e.name()).collect();
     assert_eq!(
@@ -95,6 +135,23 @@ async fn run_client(socket_path: &std::path::Path) -> Result<(), Box<dyn std::er
         ["InsufficientFunds", "InvalidAmount", "AccountLocked"],
         "Unexpected errors"
     );
+
+    // Verify error doc-comments are propagated.
+    for error in interface.errors() {
+        let comment_text: Vec<_> = error.comments().map(|c| c.content()).collect();
+        match error.name() {
+            "InsufficientFunds" => {
+                assert_eq!(comment_text, ["Not enough funds available."]);
+            }
+            "InvalidAmount" => {
+                assert_eq!(comment_text, ["The requested amount is invalid."]);
+            }
+            "AccountLocked" => {
+                assert_eq!(comment_text, ["The account is locked."]);
+            }
+            x => panic!("Unknown error: {x}"),
+        }
+    }
 
     // Verify the interface contains exactly the expected custom types.
     let type_names: Vec<_> = interface.custom_types().map(|t| t.name()).collect();

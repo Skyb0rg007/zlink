@@ -88,8 +88,11 @@ pub(crate) struct Balance {
 #[derive(Debug, Clone, PartialEq, zlink::ReplyError, introspect::ReplyError)]
 #[zlink(interface = "org.example.bank")]
 pub(crate) enum BankError {
+    /// Not enough funds available.
     InsufficientFunds { available: i64, requested: i64 },
+    /// The requested amount is invalid.
     InvalidAmount { amount: i64 },
+    /// The account is locked.
     AccountLocked,
 }
 
@@ -108,10 +111,10 @@ impl BankAccount {
     }
 }
 
-// Apply the service macro.
+/// A simple bank account service for testing.
 #[zlink::service(types = [Balance])]
 impl BankAccount {
-    // Method that returns a plain value (not Result).
+    /// Get the current account balance.
     #[zlink(interface = "org.example.bank")]
     async fn get_balance(&self) -> Balance {
         Balance {
@@ -119,7 +122,7 @@ impl BankAccount {
         }
     }
 
-    // Method that can fail - returns Result<Balance, BankError>.
+    /// Deposit funds into the account.
     async fn deposit(&mut self, amount: i64) -> Result<Balance, BankError> {
         if self.locked {
             return Err(BankError::AccountLocked);
@@ -133,7 +136,9 @@ impl BankAccount {
         })
     }
 
-    // Another method that can fail.
+    /// Withdraw funds from the account.
+    ///
+    /// Returns an error if the balance is insufficient.
     async fn withdraw(&mut self, amount: i64) -> Result<Balance, BankError> {
         if self.locked {
             return Err(BankError::AccountLocked);
@@ -153,7 +158,7 @@ impl BankAccount {
         })
     }
 
-    // Method returning Result<(), BankError> (void success, can fail).
+    /// Lock the account to prevent further transactions.
     async fn lock_account(&mut self) -> Result<(), BankError> {
         if self.locked {
             return Err(BankError::AccountLocked);

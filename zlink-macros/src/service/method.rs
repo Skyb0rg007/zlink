@@ -41,6 +41,8 @@ pub(super) struct MethodInfo {
     pub stream_uses_impl_trait: bool,
     /// Whether this method returns file descriptors (`#[zlink(return_fds)]`).
     pub return_fds: bool,
+    /// Doc-comments on this method, for introspection.
+    pub comments: Vec<String>,
 }
 
 impl MethodInfo {
@@ -51,6 +53,9 @@ impl MethodInfo {
         current_interface: &mut Option<String>,
     ) -> Result<Self, Error> {
         let name = method.sig.ident.clone();
+
+        // Extract doc comments before any attribute processing.
+        let comments = crate::utils::extract_doc_comments(&method.attrs);
 
         // Extract method attributes.
         let method_attrs = MethodAttrs::extract(&mut method.attrs)?;
@@ -303,6 +308,7 @@ impl MethodInfo {
             stream_return_type,
             stream_uses_impl_trait,
             return_fds,
+            comments,
         })
     }
 
