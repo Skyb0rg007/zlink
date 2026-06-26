@@ -28,6 +28,9 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
     // Parse macro attributes.
     let service_attrs = ServiceAttrs::parse(&attr, &item_impl)?;
 
+    // Extract doc-comments from the impl block for interface-level introspection.
+    let impl_comments = crate::utils::extract_doc_comments(&item_impl.attrs);
+
     // Validate impl block.
     validate_impl(&item_impl)?;
 
@@ -76,7 +79,8 @@ fn service_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Er
     }
 
     // Generate the Service trait implementation (uses generics from item_impl if present).
-    let service_impl = codegen::generate_service_impl(&item_impl, &methods_info, &service_attrs)?;
+    let service_impl =
+        codegen::generate_service_impl(&item_impl, &methods_info, &service_attrs, &impl_comments)?;
 
     // Prepare the output impl block.
     let mut output_impl = item_impl;

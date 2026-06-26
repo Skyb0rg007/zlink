@@ -60,6 +60,7 @@ pub(super) fn generate_service_impl(
     item_impl: &ItemImpl,
     methods_info: &[MethodInfo],
     service_attrs: &ServiceAttrs,
+    impl_comments: &[String],
 ) -> Result<TokenStream, Error> {
     let crate_path = &service_attrs.crate_path;
     let self_ty = &item_impl.self_ty;
@@ -109,6 +110,7 @@ pub(super) fn generate_service_impl(
         &interfaces,
         crate_path,
         &type_name,
+        impl_comments,
     )?;
 
     // Generate the ReplyStreamParams enum for streaming methods.
@@ -907,6 +909,7 @@ fn generate_interface_descriptions(
     interfaces: &[String],
     crate_path: &TokenStream,
     type_name: &str,
+    impl_comments: &[String],
 ) -> Result<TokenStream, Error> {
     let mut descriptions: Vec<TokenStream> = Vec::new();
 
@@ -1056,6 +1059,11 @@ fn generate_interface_descriptions(
                     }
                 });
 
+                let comment_objects = crate::introspect::shared::generate_comment_objects(
+                    &method.comments,
+                    crate_path,
+                );
+
                 Ok(quote! {
                     const #method_const_name: &#crate_path::idl::Method<'static> = &{
                         #in_params_const
@@ -1072,7 +1080,7 @@ fn generate_interface_descriptions(
                             #method_name,
                             __IN_PARAMS,
                             __OUT_PARAMS,
-                            &[],
+                            &[#(#comment_objects),*],
                         )
                     };
                 })
@@ -1151,6 +1159,9 @@ fn generate_interface_descriptions(
             })
             .collect();
 
+        let interface_comment_objects =
+            crate::introspect::shared::generate_comment_objects(impl_comments, crate_path);
+
         descriptions.push(quote! {
             #[doc(hidden)]
             const #const_name: &#crate_path::idl::Interface<'static> = &{
@@ -1160,7 +1171,7 @@ fn generate_interface_descriptions(
                     &[#(#method_refs),*],
                     &[#(#custom_types),*],
                     #error_variants_expr,
-                    &[],
+                    &[#(#interface_comment_objects),*],
                 )
             };
 
