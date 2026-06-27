@@ -208,6 +208,11 @@ pub(crate) fn get_peer_credentials(fd: impl AsFd) -> io::Result<Credentials> {
 
             // `getsockopt` returns `0` on success or `-1` on error.
             if ret == 0 {
+                assert_eq!(
+                    len as usize,
+                    size_of::<libc::c_int>(),
+                    "unexpected getsockopt size"
+                );
                 let pidfd = unsafe { pidfd.assume_init() };
                 Some(unsafe { OwnedFd::from_raw_fd(pidfd) })
             } else {
