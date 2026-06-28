@@ -40,7 +40,7 @@ async fn peer_credentials_unix_socket() {
     let pid1 = creds.process_id();
     let gid1 = creds.unix_primary_group_id();
     #[cfg(target_os = "linux")]
-    let pidfd1 = creds.process_fd().as_raw_fd();
+    let pidfd1 = creds.process_fd().map(|fd| fd.as_raw_fd());
     #[cfg(target_os = "linux")]
     let gids1 = creds.unix_supplementary_group_ids().to_owned();
 
@@ -56,7 +56,7 @@ async fn peer_credentials_unix_socket() {
     #[cfg(target_os = "linux")]
     assert_eq!(
         pidfd1,
-        creds2.process_fd().as_raw_fd(),
+        creds2.process_fd().map(|fd| fd.as_raw_fd()),
         "Cached pidfd should match"
     );
     #[cfg(target_os = "linux")]
