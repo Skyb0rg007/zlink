@@ -2,6 +2,9 @@
 
 This file provides guidance to AI coding agents when working with code in this repository.
 
+For contribution conventions — commit-message format, atomic commits, code layout, and
+more — follow the guidelines in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Development Commands
 
 ### Testing
