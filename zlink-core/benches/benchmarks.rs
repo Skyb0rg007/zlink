@@ -418,11 +418,11 @@ impl ReadHalf for BiPipeReadHalf {
                 let to_read = self.buffer.len().min(buf.len());
                 buf[..to_read].copy_from_slice(&self.buffer[..to_read]);
                 self.pos = to_read;
-                return Ok(zlink_core::connection::socket::ReadResult::new(to_read));
+                Ok(zlink_core::connection::socket::ReadResult::new(to_read))
             }
             None => {
                 // Connection closed.
-                return Ok(zlink_core::connection::socket::ReadResult::new(0));
+                Ok(zlink_core::connection::socket::ReadResult::new(0))
             }
         }
     }

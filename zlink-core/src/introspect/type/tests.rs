@@ -91,7 +91,7 @@ fn smart_pointer_types() {
 
 #[test]
 fn cell_types() {
-    use std::cell::{Cell, RefCell};
+    use core::cell::{Cell, RefCell};
     // Test Cell<f64>
     assert_eq!(*<Cell<f64>>::TYPE, idl::Type::Float);
 

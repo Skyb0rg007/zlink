@@ -33,7 +33,7 @@ async fn peer_credentials_unix_socket() {
     let creds = connection.peer_credentials().await.unwrap();
 
     // Verify all credentials match current process using shared utilities.
-    creds_utils::verify_credentials(&creds).expect("Credentials should match current process");
+    creds_utils::verify_credentials(creds).expect("Credentials should match current process");
 
     // Save values for comparison.
     let uid1 = creds.unix_user_id();

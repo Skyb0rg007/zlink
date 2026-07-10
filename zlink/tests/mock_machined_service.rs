@@ -202,6 +202,7 @@ mod server {
     }
 
     /// Mock systemd-machined service that serves hardcoded responses.
+    #[derive(Default)]
     pub struct MockMachinedService;
 
     impl MockMachinedService {
@@ -330,7 +331,7 @@ mod server {
             return Err(MachinedError::FetchPeerCredentialsFailed);
         };
         // Verify credentials match current process.
-        if creds_utils::verify_credentials(&creds).is_err() {
+        if creds_utils::verify_credentials(creds).is_err() {
             return Err(MachinedError::FetchPeerCredentialsFailed);
         }
         Ok(())

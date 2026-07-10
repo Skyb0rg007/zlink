@@ -198,8 +198,7 @@ async fn call_pipelining() {
     assert_eq!(null_count, 3);
 
     // Verify each null terminator is at the end of a complete JSON object.
-    for i in 0..null_count {
-        let pos = null_positions[i];
+    for &pos in &null_positions[..null_count] {
         assert!(
             pos > 0,
             "Null terminator at position {pos} should not be at start"

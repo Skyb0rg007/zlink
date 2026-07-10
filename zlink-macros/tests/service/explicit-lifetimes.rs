@@ -19,6 +19,8 @@ enum EchoError<'a> {
 
 struct EchoService;
 
+// The explicit lifetimes are the point of this test: the service macro must handle them.
+#[allow(clippy::needless_lifetimes)]
 #[zlink::service(types = [EchoReply])]
 impl EchoService {
     #[zlink(interface = "org.example.ExplicitLifetimes")]

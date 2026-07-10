@@ -233,7 +233,7 @@ mod tests {
         // This is important for testing the string reference handling in arrays.
         // The search method takes query: &str and tags: &[&str] for the tags parameter.
         // The proxy macro should handle the conversion properly.
-        let tags_to_search = vec!["important".to_string(), "urgent".to_string()];
+        let tags_to_search = ["important".to_string(), "urgent".to_string()];
         let tags_refs: Vec<&str> = tags_to_search.iter().map(|s| s.as_str()).collect();
 
         let result = conn

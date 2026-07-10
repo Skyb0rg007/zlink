@@ -156,8 +156,7 @@ mod tests {
 
     #[test]
     fn serialization() {
-        let mut interfaces = Vec::new();
-        interfaces.push("com.example.test");
+        let interfaces = alloc::vec!["com.example.test"];
 
         let info = Info::new(
             "Test Vendor",
@@ -196,9 +195,7 @@ mod tests {
 
     #[test]
     fn round_trip_serialization() {
-        let mut interfaces = Vec::new();
-        interfaces.push("com.example.test");
-        interfaces.push("com.example.other");
+        let interfaces = alloc::vec!["com.example.test", "com.example.other"];
 
         let original = Info::new(
             "Test Vendor",

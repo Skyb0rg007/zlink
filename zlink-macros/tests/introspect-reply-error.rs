@@ -4,62 +4,53 @@ use zlink::introspect::ReplyError;
 
 #[test]
 fn simple_error_enum() {
-    match ServiceError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 3);
+    let variants = ServiceError::VARIANTS;
+    assert_eq!(variants.len(), 3);
 
-            assert_eq!(variants[0].name(), "NotFound");
-            assert!(variants[0].has_no_fields());
+    assert_eq!(variants[0].name(), "NotFound");
+    assert!(variants[0].has_no_fields());
 
-            assert_eq!(variants[1].name(), "PermissionDenied");
-            assert!(variants[1].has_no_fields());
+    assert_eq!(variants[1].name(), "PermissionDenied");
+    assert!(variants[1].has_no_fields());
 
-            assert_eq!(variants[2].name(), "InternalError");
-            assert!(variants[2].has_no_fields());
-        }
-    }
+    assert_eq!(variants[2].name(), "InternalError");
+    assert!(variants[2].has_no_fields());
 }
 
 #[test]
 fn single_variant_error() {
-    match SingleError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 1);
-            assert_eq!(variants[0].name(), "OnlyError");
-            assert!(variants[0].has_no_fields());
-        }
-    }
+    let variants = SingleError::VARIANTS;
+    assert_eq!(variants.len(), 1);
+    assert_eq!(variants[0].name(), "OnlyError");
+    assert!(variants[0].has_no_fields());
 }
 
 #[test]
 fn multi_variant_error() {
-    match NetworkError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 5);
-            assert_eq!(variants[0].name(), "Timeout");
-            assert_eq!(variants[1].name(), "ConnectionRefused");
-            assert_eq!(variants[2].name(), "HostUnreachable");
-            assert_eq!(variants[3].name(), "InvalidResponse");
-            assert_eq!(variants[4].name(), "Unauthorized");
+    let variants = NetworkError::VARIANTS;
+    assert_eq!(variants.len(), 5);
+    assert_eq!(variants[0].name(), "Timeout");
+    assert_eq!(variants[1].name(), "ConnectionRefused");
+    assert_eq!(variants[2].name(), "HostUnreachable");
+    assert_eq!(variants[3].name(), "InvalidResponse");
+    assert_eq!(variants[4].name(), "Unauthorized");
 
-            // Verify all have no fields
-            for variant in variants {
-                assert!(variant.has_no_fields());
-            }
-        }
+    // Verify all have no fields
+    for variant in variants {
+        assert!(variant.has_no_fields());
     }
 }
 
 // Test that the macro generates const-compatible code
 #[test]
 fn const_compatibility() {
-    const _: &'static [&'static zlink::idl::Error<'static>] = ServiceError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = SingleError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = NetworkError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = DatabaseError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = ValidationError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = TupleError::VARIANTS;
-    const _: &'static [&'static zlink::idl::Error<'static>] = MixedTupleError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = ServiceError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = SingleError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = NetworkError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = DatabaseError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = ValidationError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = TupleError::VARIANTS;
+    const _: &[&zlink::idl::Error<'static>] = MixedTupleError::VARIANTS;
 }
 
 #[test]
@@ -78,114 +69,102 @@ fn error_names_match_variants() {
 
 #[test]
 fn mixed_variants_error() {
-    match DatabaseError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 4);
+    let variants = DatabaseError::VARIANTS;
+    assert_eq!(variants.len(), 4);
 
-            // Unit variant
-            assert_eq!(variants[0].name(), "ConnectionFailed");
-            assert!(variants[0].has_no_fields());
+    // Unit variant
+    assert_eq!(variants[0].name(), "ConnectionFailed");
+    assert!(variants[0].has_no_fields());
 
-            // Variant with named fields
-            assert_eq!(variants[1].name(), "InvalidQuery");
-            assert!(!variants[1].has_no_fields());
-            let fields: Vec<_> = variants[1].fields().collect();
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name(), "message");
-            assert_eq!(fields[1].name(), "line");
+    // Variant with named fields
+    assert_eq!(variants[1].name(), "InvalidQuery");
+    assert!(!variants[1].has_no_fields());
+    let fields: Vec<_> = variants[1].fields().collect();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "message");
+    assert_eq!(fields[1].name(), "line");
 
-            // Another variant with named fields
-            assert_eq!(variants[2].name(), "Timeout");
-            assert!(!variants[2].has_no_fields());
-            let fields: Vec<_> = variants[2].fields().collect();
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].name(), "seconds");
+    // Another variant with named fields
+    assert_eq!(variants[2].name(), "Timeout");
+    assert!(!variants[2].has_no_fields());
+    let fields: Vec<_> = variants[2].fields().collect();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name(), "seconds");
 
-            // Variant with multiple named fields
-            assert_eq!(variants[3].name(), "AccessDenied");
-            assert!(!variants[3].has_no_fields());
-            let fields: Vec<_> = variants[3].fields().collect();
-            assert_eq!(fields.len(), 3);
-            assert_eq!(fields[0].name(), "user");
-            assert_eq!(fields[1].name(), "resource");
-            assert_eq!(fields[2].name(), "action");
-        }
-    }
+    // Variant with multiple named fields
+    assert_eq!(variants[3].name(), "AccessDenied");
+    assert!(!variants[3].has_no_fields());
+    let fields: Vec<_> = variants[3].fields().collect();
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0].name(), "user");
+    assert_eq!(fields[1].name(), "resource");
+    assert_eq!(fields[2].name(), "action");
 }
 
 #[test]
 fn named_fields_only_error() {
-    match ValidationError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 2);
+    let variants = ValidationError::VARIANTS;
+    assert_eq!(variants.len(), 2);
 
-            // All variants should have fields
-            for variant in variants {
-                assert!(!variant.has_no_fields());
-            }
-
-            assert_eq!(variants[0].name(), "FieldMissing");
-            let fields: Vec<_> = variants[0].fields().collect();
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].name(), "field_name");
-
-            assert_eq!(variants[1].name(), "InvalidFormat");
-            let fields: Vec<_> = variants[1].fields().collect();
-            assert_eq!(fields.len(), 3);
-            assert_eq!(fields[0].name(), "field_name");
-            assert_eq!(fields[1].name(), "expected");
-            assert_eq!(fields[2].name(), "actual");
-        }
+    // All variants should have fields
+    for variant in variants {
+        assert!(!variant.has_no_fields());
     }
+
+    assert_eq!(variants[0].name(), "FieldMissing");
+    let fields: Vec<_> = variants[0].fields().collect();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name(), "field_name");
+
+    assert_eq!(variants[1].name(), "InvalidFormat");
+    let fields: Vec<_> = variants[1].fields().collect();
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0].name(), "field_name");
+    assert_eq!(fields[1].name(), "expected");
+    assert_eq!(fields[2].name(), "actual");
 }
 
 #[test]
 fn tuple_variant_error() {
-    match TupleError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 2);
+    let variants = TupleError::VARIANTS;
+    assert_eq!(variants.len(), 2);
 
-            // Unit variant
-            assert_eq!(variants[0].name(), "Simple");
-            assert!(variants[0].has_no_fields());
+    // Unit variant
+    assert_eq!(variants[0].name(), "Simple");
+    assert!(variants[0].has_no_fields());
 
-            // Tuple variant with struct fields
-            assert_eq!(variants[1].name(), "Complex");
-            assert!(!variants[1].has_no_fields());
-            let fields: Vec<_> = variants[1].fields().collect();
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name(), "code");
-            assert_eq!(fields[1].name(), "description");
-        }
-    }
+    // Tuple variant with struct fields
+    assert_eq!(variants[1].name(), "Complex");
+    assert!(!variants[1].has_no_fields());
+    let fields: Vec<_> = variants[1].fields().collect();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "code");
+    assert_eq!(fields[1].name(), "description");
 }
 
 #[test]
 fn mixed_tuple_and_named_error() {
-    match MixedTupleError::VARIANTS {
-        variants => {
-            assert_eq!(variants.len(), 3);
+    let variants = MixedTupleError::VARIANTS;
+    assert_eq!(variants.len(), 3);
 
-            // Unit variant
-            assert_eq!(variants[0].name(), "NotFound");
-            assert!(variants[0].has_no_fields());
+    // Unit variant
+    assert_eq!(variants[0].name(), "NotFound");
+    assert!(variants[0].has_no_fields());
 
-            // Named field variant
-            assert_eq!(variants[1].name(), "InvalidInput");
-            assert!(!variants[1].has_no_fields());
-            let fields: Vec<_> = variants[1].fields().collect();
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].name(), "message");
+    // Named field variant
+    assert_eq!(variants[1].name(), "InvalidInput");
+    assert!(!variants[1].has_no_fields());
+    let fields: Vec<_> = variants[1].fields().collect();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name(), "message");
 
-            // Tuple variant
-            assert_eq!(variants[2].name(), "DatabaseError");
-            assert!(!variants[2].has_no_fields());
-            let fields: Vec<_> = variants[2].fields().collect();
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name(), "code");
-            assert_eq!(fields[1].name(), "description");
-        }
-    }
+    // Tuple variant
+    assert_eq!(variants[2].name(), "DatabaseError");
+    assert!(!variants[2].has_no_fields());
+    let fields: Vec<_> = variants[2].fields().collect();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name(), "code");
+    assert_eq!(fields[1].name(), "description");
 }
 
 // Test basic service error enum

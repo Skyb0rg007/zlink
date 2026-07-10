@@ -268,8 +268,8 @@ async fn chain_receive_fds_from_server() {
     assert_eq!(fds.len(), 3);
 
     // Remaining results have no FDs (no new read operations).
-    for i in 1..3 {
-        let (reply, fds) = results[i].as_ref().unwrap();
+    for (i, result) in results.iter().enumerate().skip(1) {
+        let (reply, fds) = result.as_ref().unwrap();
         let user = reply.as_ref().unwrap();
         assert_eq!(user.parameters().unwrap().id, (i + 1) as u32);
         assert_eq!(fds.len(), 0);

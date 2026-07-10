@@ -4,6 +4,8 @@ async fn lifetimes_test() {
     use serde_json::json;
     use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
+    // The explicit lifetimes are the point of this test: the proxy macro must handle them.
+    #[allow(clippy::needless_lifetimes)]
     #[proxy("org.example.Lifetimes")]
     trait LifetimeProxy {
         async fn process<'a>(
