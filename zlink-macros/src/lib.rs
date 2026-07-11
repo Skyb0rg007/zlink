@@ -1038,7 +1038,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///
 /// ## On parameters:
 ///
-/// * `#[zlink(rename = "paramName")]` - Custom serialized parameter name.
+/// * `#[zlink(rename = "paramName")]` - Custom serialized parameter name. **Required** for
+///   parameter names starting with `_` (the Rust convention for unused parameters), since such
+///   names are not valid in the Varlink IDL.
 /// * `#[zlink(connection)]` - Mark this parameter to receive a mutable reference to the connection.
 ///   This is useful for accessing peer credentials or other connection-specific functionality.
 ///   **Requires an explicit generic socket type parameter** (e.g., `impl<Sock> MyService`).
@@ -1069,6 +1071,9 @@ pub fn derive_reply_error(input: proc_macro::TokenStream) -> proc_macro::TokenSt
 ///     }
 /// }
 /// ```
+///
+/// Similarly, parameter names starting with `_` are rejected because they are not valid in the
+/// Varlink IDL. Specify the wire name explicitly with `#[zlink(rename = "...")]`.
 ///
 /// # Generated Code
 ///

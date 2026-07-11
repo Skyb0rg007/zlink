@@ -227,11 +227,11 @@ mod server {
         #[allow(clippy::too_many_arguments)]
         async fn register(
             &self,
-            _name: String,
-            _id: Option<String>,
-            _service: Option<String>,
-            _class: String,
-            _leader: Option<u32>,
+            #[zlink(rename = "name")] _name: String,
+            #[zlink(rename = "id")] _id: Option<String>,
+            #[zlink(rename = "service")] _service: Option<String>,
+            #[zlink(rename = "class")] _class: String,
+            #[zlink(rename = "leader")] _leader: Option<u32>,
             #[zlink(rename = "leaderProcessId")] _leader_process_id: Option<ProcessId>,
             #[zlink(rename = "rootDirectory")] _root_directory: Option<String>,
             #[zlink(rename = "ifIndices")] _if_indices: Option<Vec<u64>>,
@@ -249,8 +249,8 @@ mod server {
 
         async fn unregister(
             &self,
-            _name: Option<String>,
-            _pid: Option<ProcessId>,
+            #[zlink(rename = "name")] _name: Option<String>,
+            #[zlink(rename = "pid")] _pid: Option<ProcessId>,
             #[zlink(rename = "allowInteractiveAuthentication")]
             _allow_interactive_authentication: Option<bool>,
             #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
@@ -261,8 +261,8 @@ mod server {
 
         async fn terminate(
             &self,
-            _name: Option<String>,
-            _pid: Option<ProcessId>,
+            #[zlink(rename = "name")] _name: Option<String>,
+            #[zlink(rename = "pid")] _pid: Option<ProcessId>,
             #[zlink(rename = "allowInteractiveAuthentication")]
             _allow_interactive_authentication: Option<bool>,
             #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
@@ -273,12 +273,12 @@ mod server {
 
         async fn kill(
             &self,
-            _name: Option<String>,
-            _pid: Option<ProcessId>,
+            #[zlink(rename = "name")] _name: Option<String>,
+            #[zlink(rename = "pid")] _pid: Option<ProcessId>,
             #[zlink(rename = "allowInteractiveAuthentication")]
             _allow_interactive_authentication: Option<bool>,
-            _whom: Option<String>,
-            _signal: i64,
+            #[zlink(rename = "whom")] _whom: Option<String>,
+            #[zlink(rename = "signal")] _signal: i64,
             #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
         ) -> Result<(), MachinedError> {
             verify_credentials(conn).await?;
@@ -287,8 +287,8 @@ mod server {
 
         async fn list(
             &self,
-            _name: Option<String>,
-            _pid: Option<ProcessId>,
+            #[zlink(rename = "name")] _name: Option<String>,
+            #[zlink(rename = "pid")] _pid: Option<ProcessId>,
             #[zlink(rename = "allowInteractiveAuthentication")]
             _allow_interactive_authentication: Option<bool>,
             #[zlink(rename = "acquireMetadata")] _acquire_metadata: Option<AcquireMetadata>,
@@ -301,15 +301,15 @@ mod server {
         #[allow(clippy::too_many_arguments)]
         async fn open(
             &self,
-            _name: Option<String>,
-            _pid: Option<ProcessId>,
+            #[zlink(rename = "name")] _name: Option<String>,
+            #[zlink(rename = "pid")] _pid: Option<ProcessId>,
             #[zlink(rename = "allowInteractiveAuthentication")]
             _allow_interactive_authentication: Option<bool>,
-            _mode: MachineOpenMode,
-            _user: Option<String>,
-            _path: Option<String>,
-            _args: Option<Vec<String>>,
-            _environment: Option<Vec<String>>,
+            #[zlink(rename = "mode")] _mode: MachineOpenMode,
+            #[zlink(rename = "user")] _user: Option<String>,
+            #[zlink(rename = "path")] _path: Option<String>,
+            #[zlink(rename = "args")] _args: Option<Vec<String>>,
+            #[zlink(rename = "environment")] _environment: Option<Vec<String>>,
             #[zlink(connection)] conn: &mut zlink::Connection<Sock>,
         ) -> Result<OpenReply, MachinedError> {
             verify_credentials(conn).await?;

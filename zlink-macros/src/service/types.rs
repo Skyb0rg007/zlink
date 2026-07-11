@@ -1,5 +1,7 @@
 //! Types used in service macro processing.
 
+use std::borrow::Cow;
+
 use syn::{FnArg, Ident, Pat, Type};
 
 /// Information about a method parameter.
@@ -20,6 +22,18 @@ pub(super) struct ParamInfo {
 }
 
 impl ParamInfo {
+    /// The parameter name used on the wire (and in the IDL).
+    ///
+    /// This is the explicit `#[zlink(rename = "...")]` name if provided, the Rust parameter
+    /// name otherwise. Parameter names starting with `_` are rejected at extraction time, so
+    /// this is always a valid Varlink field name.
+    pub(super) fn wire_name(&self) -> Cow<'_, str> {
+        match &self.serialized_name {
+            Some(name) => Cow::Borrowed(name),
+            None => Cow::Owned(self.name.to_string()),
+        }
+    }
+
     /// Extract parameter information from a function argument.
     pub(super) fn from_fn_arg(arg: &FnArg) -> Option<Self> {
         let FnArg::Typed(pat_type) = arg else {

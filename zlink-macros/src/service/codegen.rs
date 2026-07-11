@@ -314,8 +314,11 @@ fn generate_method_call_enum(
                         let name = &param.name;
                         let converted_ty = convert_type_lifetimes(&param.ty, "'__de");
 
-                        let serde_attr = if let Some(ref renamed) = param.serialized_name {
-                            quote! { #[serde(rename = #renamed)] }
+                        // Rename whenever the wire name differs from the Rust name, so that
+                        // dispatch stays consistent with the introspection data.
+                        let wire_name = param.wire_name();
+                        let serde_attr = if *name != wire_name {
+                            quote! { #[serde(rename = #wire_name)] }
                         } else {
                             quote! {}
                         };
@@ -977,10 +980,7 @@ fn generate_interface_descriptions(
                 let in_params: Vec<TokenStream> = method
                     .serialized_params()
                     .map(|p| {
-                        // Strip leading underscores from parameter names for IDL (Rust convention
-                        // uses `_name` for unused params, but Varlink IDL doesn't allow that).
-                        let default_name = p.name.to_string().trim_start_matches('_').to_string();
-                        let param_name = p.serialized_name.as_ref().unwrap_or(&default_name);
+                        let param_name = p.wire_name();
                         let ty = convert_type_lifetimes(&p.ty, "'static");
                         quote! {
                             &#crate_path::idl::Parameter::new(
