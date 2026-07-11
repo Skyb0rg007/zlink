@@ -12,7 +12,7 @@ async fn service_macro_basic() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let socket_path = dir.path().join("test.sock");
 
-    // Setup the server and run it in a separate task.
+    // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
     let service = BankAccount::new(1000, false);
     let server = Server::new(listener, service);

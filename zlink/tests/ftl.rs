@@ -37,7 +37,7 @@ async fn ftl() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    // Setup the server and run it in a separate task.
+    // Set up the server and run it concurrently with the client.
     let listener = bind(&socket_path).unwrap();
     let service = Ftl::new(conditions[0]);
     let server = zlink::Server::new(listener, service);
