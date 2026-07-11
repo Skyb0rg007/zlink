@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 💥 Let Listener::accept signal exhaustion.
 
 ### Changed
-- 🔧 Replace hardcoded /tmp socket paths.
 - 🎨 A micro refactor.
 
 ### Documentation

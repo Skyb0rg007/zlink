@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 💥 Require rename for underscore-prefixed method params. #278
 
 ### Changed
+- 🔧 Replace hardcoded /tmp socket paths.
 - 🔧 Replace hardcoded /tmp socket paths with tempfile.
 
 ### Documentation

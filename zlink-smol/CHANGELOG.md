@@ -17,9 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 💥 Socket::read now returns a named struct.
 - 💥 Let Listener::accept signal exhaustion.
 
-### Changed
-- 🔧 Replace hardcoded /tmp socket paths.
-
 ## 0.5.0 - 2026-05-03
 
 ### Fixed
