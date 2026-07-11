@@ -47,7 +47,7 @@ pub(super) fn generate_chain_method(
     }
 
     // Generate chain method name
-    let chain_method_name = syn::Ident::new(&format!("chain_{}", &method_name_str), method_span);
+    let chain_method_name = syn::Ident::new(&format!("chain_{method_name_str}"), method_span);
 
     let converted_name = snake_case_to_pascal_case(&method_name_str);
     let actual_method_name = method_attrs.rename.as_deref().unwrap_or(&converted_name);

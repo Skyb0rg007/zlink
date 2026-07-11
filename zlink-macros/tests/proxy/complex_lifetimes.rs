@@ -5,6 +5,8 @@ async fn complex_lifetimes_test() {
     use std::collections::HashMap;
     use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
 
+    // The explicit lifetimes are the point of this test: the proxy macro must handle them.
+    #[allow(clippy::needless_lifetimes)]
     #[proxy("org.example.Complex")]
     trait ComplexProxy {
         async fn process_array(

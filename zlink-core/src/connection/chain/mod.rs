@@ -406,9 +406,9 @@ mod tests {
         #[derive(Debug, Serialize, Deserialize)]
         #[serde(untagged)]
         enum HeterogeneousErrors {
-            UserError(ApiError),
-            PostError(PostError),
-            DeleteError(DeleteError),
+            User(ApiError),
+            Post(PostError),
+            Delete(DeleteError),
         }
 
         #[derive(Debug, Serialize, Deserialize)]

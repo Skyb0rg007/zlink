@@ -60,7 +60,7 @@ mod tests {
             static VARIANT_ACTIVE: EnumVariant<'static> = EnumVariant::new("Active", &[]);
             static VARIANT_INACTIVE: EnumVariant<'static> = EnumVariant::new("Inactive", &[]);
             static VARIANT_PENDING: EnumVariant<'static> = EnumVariant::new("Pending", &[]);
-            static VARIANTS: &[&'static EnumVariant<'static>] =
+            static VARIANTS: &[&EnumVariant<'static>] =
                 &[&VARIANT_ACTIVE, &VARIANT_INACTIVE, &VARIANT_PENDING];
 
             idl::CustomType::Enum(CustomEnum::new("Status", VARIANTS, &[]))

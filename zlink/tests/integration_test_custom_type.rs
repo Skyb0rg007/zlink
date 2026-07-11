@@ -38,8 +38,7 @@ impl CustomType for Color {
         static VARIANT_RED: EnumVariant<'static> = EnumVariant::new("Red", &[]);
         static VARIANT_GREEN: EnumVariant<'static> = EnumVariant::new("Green", &[]);
         static VARIANT_BLUE: EnumVariant<'static> = EnumVariant::new("Blue", &[]);
-        static VARIANTS: &[&'static EnumVariant<'static>] =
-            &[&VARIANT_RED, &VARIANT_GREEN, &VARIANT_BLUE];
+        static VARIANTS: &[&EnumVariant<'static>] = &[&VARIANT_RED, &VARIANT_GREEN, &VARIANT_BLUE];
 
         idl::CustomType::Enum(CustomEnum::new("Color", VARIANTS, &[]))
     };

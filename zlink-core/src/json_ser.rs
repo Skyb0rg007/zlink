@@ -1311,8 +1311,8 @@ mod tests {
         let n = to_slice(&-42i64, &mut buf).unwrap();
         assert_eq!(&buf[..n], b"-42");
 
-        let n = to_slice(&3.14f64, &mut buf).unwrap();
-        assert_eq!(&buf[..n], b"3.14");
+        let n = to_slice(&2.5f64, &mut buf).unwrap();
+        assert_eq!(&buf[..n], b"2.5");
 
         let n = to_slice(&"hello", &mut buf).unwrap();
         assert_eq!(&buf[..n], b"\"hello\"");

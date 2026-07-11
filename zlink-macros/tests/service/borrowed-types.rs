@@ -85,7 +85,7 @@ impl Calculator {
             Err(CalculatorError::DivisionByZero {
                 message: "Cannot divide by zero",
             })
-        } else if dividend < -1000000.0 || dividend > 1000000.0 {
+        } else if !(-1000000.0..=1000000.0).contains(&dividend) {
             Err(CalculatorError::InvalidInput {
                 field: "dividend",
                 reason: "must be within range",

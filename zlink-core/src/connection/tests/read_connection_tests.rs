@@ -49,7 +49,7 @@ async fn malformed_json_deeply_nested_objects() {
     for _ in 0..10000 {
         malicious.push_str(r#"{"a":"#);
     }
-    malicious.push_str("0");
+    malicious.push('0');
     for _ in 0..10000 {
         malicious.push('}');
     }
@@ -72,7 +72,7 @@ async fn malformed_json_deeply_nested_arrays() {
     for _ in 0..10000 {
         malicious.push('[');
     }
-    malicious.push_str("0");
+    malicious.push('0');
     for _ in 0..10000 {
         malicious.push(']');
     }

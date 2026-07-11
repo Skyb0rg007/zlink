@@ -21,7 +21,7 @@ async fn per_interface_types() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = dir.path().join("per-iface-types.sock");
 
     let listener = bind(&socket_path).unwrap();
-    let service = CatalogService::default();
+    let service = CatalogService;
     let server = Server::new(listener, service);
     tokio::select! {
         res = server.run() => res?,
