@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.0 - 2026-07-11
+
+### Breaking
+- 💥 Require rename for underscore-prefixed method params. #278
+- 💥 Let Listener::accept signal exhaustion.
+
+### Changed
+- 🔧 Replace hardcoded /tmp socket paths.
+
+### Documentation
+- 💡 Fix stale comment about server task in tests.
+
+### Other
+- 🚨 Fix clippy warnings from latest stable Rust.
+
+### Security
+- 🔒️ remove pidfd_open fallback.
+
+### Testing
+- ✅ Test for passing credentials over unix sockets.
+- ✅ Regression test for ReadyListener-driven server exit.
+
 ## 0.5.0 - 2026-05-03
 
 ### Fixed
