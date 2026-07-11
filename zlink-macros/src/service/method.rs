@@ -113,6 +113,21 @@ impl MethodInfo {
             }
         }
 
+        // Underscore-prefixed names are not valid Varlink field names, so serialized parameters
+        // (the ones that end up on the wire and in the IDL) must be given an explicit wire name.
+        for param in params
+            .iter()
+            .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
+        {
+            if param.serialized_name.is_none() && param.name.to_string().starts_with('_') {
+                return Err(Error::new_spanned(
+                    &param.name,
+                    "parameter names starting with `_` are not valid Varlink field names; \
+                     specify the wire name with `#[zlink(rename = \"...\")]`",
+                ));
+            }
+        }
+
         // Validate FD attributes.
         let return_fds = method_attrs.return_fds;
         let fds_params: Vec<_> = params.iter().filter(|p| p.is_fds).collect();
