@@ -12,34 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✨ Introduce generate_files() function.
 - ✨ Introduce an error.rs.
 
-### Changed
-- 🔧 Replace hardcoded /tmp socket paths.
-- 🏗️ ReplyError derive no longer requires specific field order.
-- 🏗️ Drop support for `no_alloc`. #144
-
-### Dependencies
-- ⬆️ Update chrono to v0.4.42 (#107).
-
-### Documentation
-- 📝 Update docs as per the recent changes.
-- 📝 Drop explicit lifetimes in Server example.
-- 📝 Advertise the new Matrix channel.
-- 📝 Redesign the top part, now that we have a nice logo.
-- 📝 Add logo to the docs.
-
-### Fixed
-- 🐛 Fix the example varlink interface. #145
-- 🐛 Add `rename` attributes to method parameters. #129
-- 🐛 add `zlink` instead of `serde` attribute for ReplyError.
-
 ### Other
 - 🚨 Fix clippy warnings from latest stable Rust.
 - ♻ Refactor main.rs to use generate_files().
-- 📄 Add license file to individual crates. #131
 
 ### Testing
 - ✅ Update test-integration to use generate_files().
-- 🧪 Add tests for camelCase params/fields.
 
 ## 0.5.0 - 2026-05-03
 
