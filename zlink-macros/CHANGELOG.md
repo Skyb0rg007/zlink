@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.0 - 2026-07-11
+
+### Added
+- ✨ Support custom types per interface in introspection.
+
+### Breaking
+- 💥 Require rename for underscore-prefixed method params. #278
+
+### Changed
+- 🔧 Replace hardcoded /tmp socket paths with tempfile.
+
+### Documentation
+- 💡 Fix stale comment about server task in tests.
+- 📝 Add doc-comments to BankAccount test service.
+
+### Fixed
+- 🐛 Fix introspection to include method & interface doc-comments.
+
+### Other
+- 🚨 Fix clippy warnings from latest stable Rust.
+
+### Testing
+- ✅ Add test for underscore-prefixed method params.
+- ✅ Add tests for method & interface doc-comment introspection.
+
 ## 0.5.0 - 2026-05-03
 
 ### Added
