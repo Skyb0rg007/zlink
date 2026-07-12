@@ -71,7 +71,7 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 
 - `idl`: Support for IDL type representations.
 - `introspection`: Enable runtime introspection of service interfaces.
-- `idl-parse`: Parse Varlink IDL files at runtime (requires `std`).
+- `idl-parse`: Parse Varlink IDL at runtime (works in `no_std`).
 
 ### Development Patterns
 - Uses workspace-level package metadata (edition, rust-version, license, repository)
