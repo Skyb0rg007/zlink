@@ -231,6 +231,9 @@ impl Calculator {
 > **Note**: Typically you would want to spawn the server in a separate task but that's not what we
 > did in the example above. Please refer to [`Server::run` docs] for the reason.
 
+For ready-to-run examples you can execute with `cargo run`, see the [`examples`](zlink/examples)
+directory.
+
 ## Code Generation from IDL
 
 zlink-codegen can generate Rust code from Varlink interface description files:
@@ -375,24 +378,6 @@ struct BatchResult {
 enum ProcessError {
     InvalidRequest { message: String },
 }
-```
-
-## Examples
-
-The repository includes a few examples:
-
-- **[resolved.rs](zlink/examples/resolved.rs)**: DNS resolution using systemd-resolved's Varlink
-  service
-- **[varlink-inspect.rs](zlink/examples/varlink-inspect.rs)**: Service introspection tool
-
-Run examples with:
-
-```bash
-cargo run --example resolved -- example.com systemd.io
-cargo run \
-  --example varlink-inspect \
-  --features idl-parse,introspection -- \
-  /run/systemd/resolve/io.systemd.Resolve
 ```
 
 ## Features
