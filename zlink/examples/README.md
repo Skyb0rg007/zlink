@@ -2,6 +2,23 @@
 
 This directory contains examples demonstrating the usage of the zlink library.
 
+## resolved
+
+A CLI tool that resolves hostnames to IP addresses using `systemd-resolved`'s Varlink service.
+
+### Description
+
+The `resolved` example demonstrates how to use the `#[proxy]` macro to generate a type-safe client
+API, and how to use request pipelining to send multiple resolution requests at once. It connects to
+`systemd-resolved` over its Unix domain socket and prints the resolved addresses for each hostname.
+
+### Usage
+
+```bash
+# Resolve one or more hostnames
+cargo run --example resolved -- example.com systemd.io
+```
+
 ## varlink-inspect
 
 A CLI tool for inspecting Varlink services via Unix domain sockets.
