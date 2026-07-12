@@ -48,6 +48,7 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 - **zlink-core**: No-std foundation providing core APIs. Not used directly.
 - **zlink-macros**: Contains the attribute and derive macros. Not used directly.
 - **zlink-tokio**: Tokio runtime integration and transport implementations. Not used directly.
+- **zlink-smol**: smol runtime integration and transport implementations. Not used directly.
 - **zlink**: Main unified API crate that re-exports appropriate subcrates based on cargo features.
 
 ### Key Components
@@ -71,7 +72,7 @@ This is a Rust workspace implementing an asynchronous Varlink IPC library. The a
 
 - `idl`: Support for IDL type representations.
 - `introspection`: Enable runtime introspection of service interfaces.
-- `idl-parse`: Parse Varlink IDL files at runtime (requires `std`).
+- `idl-parse`: Parse Varlink IDL at runtime (works in `no_std`).
 
 ### Development Patterns
 - Uses workspace-level package metadata (edition, rust-version, license, repository)
