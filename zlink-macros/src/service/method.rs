@@ -459,10 +459,10 @@ fn extract_param_attrs(attrs: &[Attribute]) -> ParamAttrs {
         for meta in nested {
             match &meta {
                 Meta::NameValue(nv) if nv.path.is_ident("rename") => {
-                    if let Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(lit_str) = &expr_lit.lit {
-                            result.rename = Some(lit_str.value());
-                        }
+                    if let Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(lit_str) = &expr_lit.lit
+                    {
+                        result.rename = Some(lit_str.value());
                     }
                 }
                 Meta::Path(path) if path.is_ident("connection") => {
@@ -545,10 +545,10 @@ pub(super) fn extract_stream_item_type(ty: &Type) -> Option<Type> {
         // Handle `impl Stream<Item = T> + ...` (impl trait syntax).
         Type::ImplTrait(impl_trait) => {
             for bound in &impl_trait.bounds {
-                if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                    if let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound) {
-                        return Some(item_type);
-                    }
+                if let syn::TypeParamBound::Trait(trait_bound) = bound
+                    && let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound)
+                {
+                    return Some(item_type);
                 }
             }
             None
@@ -556,10 +556,10 @@ pub(super) fn extract_stream_item_type(ty: &Type) -> Option<Type> {
         // Handle dyn trait syntax (e.g., `Box<dyn Stream<Item = T>>`).
         Type::TraitObject(trait_object) => {
             for bound in &trait_object.bounds {
-                if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                    if let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound) {
-                        return Some(item_type);
-                    }
+                if let syn::TypeParamBound::Trait(trait_bound) = bound
+                    && let Some(item_type) = extract_stream_item_from_trait_bound(trait_bound)
+                {
+                    return Some(item_type);
                 }
             }
             None
@@ -599,10 +599,10 @@ fn extract_stream_item_from_trait_bound(trait_bound: &syn::TraitBound) -> Option
 
     // Find the `Item = T` binding.
     for arg in &args.args {
-        if let GenericArgument::AssocType(assoc_type) = arg {
-            if assoc_type.ident == "Item" {
-                return Some(assoc_type.ty.clone());
-            }
+        if let GenericArgument::AssocType(assoc_type) = arg
+            && assoc_type.ident == "Item"
+        {
+            return Some(assoc_type.ty.clone());
         }
     }
 
