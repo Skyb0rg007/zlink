@@ -46,10 +46,10 @@ fn collect_interfaces(methods_info: &[MethodInfo]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for method in methods_info {
-        if let Some(ref iface) = method.interface {
-            if seen.insert(iface.clone()) {
-                interfaces.push(iface.clone());
-            }
+        if let Some(ref iface) = method.interface
+            && seen.insert(iface.clone())
+        {
+            interfaces.push(iface.clone());
         }
     }
     interfaces

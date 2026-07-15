@@ -34,14 +34,14 @@ pub const fn assert_params_declared(params: &[&idl::Parameter<'_>], declared: &[
 /// Panics at compile time if `ty` is (or contains) a `Custom(name)` that is not in
 /// `declared`.
 pub const fn assert_type_declared(ty: &idl::Type<'_>, declared: &[&str]) {
-    if let Some(name) = custom_type_name(ty) {
-        if !name_in_list(name, declared) {
-            panic!(
-                "custom type used in method signature is not declared in `types = [...]`; \
+    if let Some(name) = custom_type_name(ty)
+        && !name_in_list(name, declared)
+    {
+        panic!(
+            "custom type used in method signature is not declared in `types = [...]`; \
                  add it to the `types` list on the `#[zlink(interface = \"...\", types = [...])]` \
                  attribute"
-            );
-        }
+        );
     }
 }
 

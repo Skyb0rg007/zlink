@@ -119,13 +119,12 @@ where
         }
 
         // Parse all meta items in this zlink attribute
-        if meta_items_to_process.is_none() {
-            if let Ok(meta_items) =
+        if meta_items_to_process.is_none()
+            && let Ok(meta_items) =
                 list.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)
-            {
-                meta_items_to_process = Some(meta_items);
-                zlink_attr_indices.push(i);
-            }
+        {
+            meta_items_to_process = Some(meta_items);
+            zlink_attr_indices.push(i);
         }
     }
 
@@ -217,14 +216,14 @@ pub(super) fn build_combined_where_clause(
 
     // Add generic bounds to where clause
     for param in &generics.params {
-        if let syn::GenericParam::Type(type_param) = param {
-            if !type_param.bounds.is_empty() {
-                let type_name = &type_param.ident;
-                let bounds = &type_param.bounds;
-                where_clause
-                    .predicates
-                    .push(syn::parse_quote!(#type_name: #bounds));
-            }
+        if let syn::GenericParam::Type(type_param) = param
+            && !type_param.bounds.is_empty()
+        {
+            let type_name = &type_param.ident;
+            let bounds = &type_param.bounds;
+            where_clause
+                .predicates
+                .push(syn::parse_quote!(#type_name: #bounds));
         }
     }
 

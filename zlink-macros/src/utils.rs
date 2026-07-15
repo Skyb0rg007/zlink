@@ -58,14 +58,13 @@ pub(crate) fn extract_doc_comments(attrs: &[Attribute]) -> Vec<String> {
             // Try different parsing methods
             if let Ok(lit_str) = attr.parse_args::<syn::LitStr>() {
                 comments.push(lit_str.value());
-            } else if let syn::Meta::NameValue(meta_name_value) = &attr.meta {
-                if let syn::Expr::Lit(syn::ExprLit {
+            } else if let syn::Meta::NameValue(meta_name_value) = &attr.meta
+                && let syn::Expr::Lit(syn::ExprLit {
                     lit: syn::Lit::Str(lit_str),
                     ..
                 }) = &meta_name_value.value
-                {
-                    comments.push(lit_str.value());
-                }
+            {
+                comments.push(lit_str.value());
             }
         }
     }

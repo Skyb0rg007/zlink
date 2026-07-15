@@ -48,12 +48,12 @@ fn proxy_impl(attr: TokenStream, input: TokenStream) -> Result<TokenStream, Erro
             let mut param_attrs_map: HashMap<String, ParamAttrs> = HashMap::new();
             for arg in method.sig.inputs.iter_mut().skip(1) {
                 // Skip &mut self
-                if let FnArg::Typed(pat_type) = arg {
-                    if let Pat::Ident(pat_ident) = &*pat_type.pat {
-                        let param_name = pat_ident.ident.to_string();
-                        let attrs = extract_param_attrs(&mut pat_type.attrs)?;
-                        param_attrs_map.insert(param_name, attrs);
-                    }
+                if let FnArg::Typed(pat_type) = arg
+                    && let Pat::Ident(pat_ident) = &*pat_type.pat
+                {
+                    let param_name = pat_ident.ident.to_string();
+                    let attrs = extract_param_attrs(&mut pat_type.attrs)?;
+                    param_attrs_map.insert(param_name, attrs);
                 }
             }
 
