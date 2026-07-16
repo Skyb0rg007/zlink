@@ -312,59 +312,10 @@ pub(crate) fn has_zlink_bool_attr(attrs: &[Attribute], key: &str) -> bool {
     false
 }
 
-/// Parse a string value from a zlink attribute with a specific key.
-///
-/// For example, parse `#[zlink(rename = "new_name")]` by calling with key "rename".
-/// Returns None if the attribute or key is not found.
-///
-/// This is used by both `reply_error` and `proxy` modules for parsing rename attributes.
-pub(crate) fn parse_zlink_string_attr(attrs: &[Attribute], key: &str) -> Option<String> {
-    for attr in attrs {
-        if !attr.path().is_ident("zlink") {
-            continue;
-        }
-
-        let mut result = None;
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident(key) {
-                let value = meta.value()?;
-                let lit_str: syn::LitStr = value.parse()?;
-                result = Some(lit_str.value());
-            } else {
-                skip_unknown_meta(&meta)?;
-            }
-            Ok(())
-        });
-
-        if result.is_some() {
-            return result;
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use syn::parse_quote;
-
-    #[test]
-    fn string_attr_after_valueless_key() {
-        let attr: Attribute = parse_quote!(#[zlink(borrow, rename = "actualName")]);
-        assert_eq!(
-            parse_zlink_string_attr(&[attr], "rename").as_deref(),
-            Some("actualName"),
-        );
-    }
-
-    #[test]
-    fn string_attr_before_valueless_key() {
-        let attr: Attribute = parse_quote!(#[zlink(rename = "actualName", borrow)]);
-        assert_eq!(
-            parse_zlink_string_attr(&[attr], "rename").as_deref(),
-            Some("actualName"),
-        );
-    }
 
     #[cfg(feature = "introspection")]
     #[test]

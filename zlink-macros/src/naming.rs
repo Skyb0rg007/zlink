@@ -173,8 +173,8 @@ where
 
 /// The string value of `#[zlink(<key> = "...")]`, if present.
 ///
-/// Unlike `utils::parse_zlink_string_attr` this reports parse errors rather than swallowing them,
-/// which is what the rename attributes need in order to reject bad input.
+/// Parse errors are reported rather than swallowed, which is what the rename attributes need in
+/// order to reject bad input.
 fn parse_zlink_lit_str(attrs: &[Attribute], key: &str) -> Result<Option<LitStr>, Error> {
     let mut result = None;
 

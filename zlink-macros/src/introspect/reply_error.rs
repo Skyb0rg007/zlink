@@ -2,7 +2,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DataEnum, DeriveInput, Error, Fields};
 
-use crate::utils;
+use crate::{naming, utils};
 
 use super::shared;
 
@@ -22,9 +22,16 @@ fn derive_reply_error_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let crate_path = utils::parse_crate_path(&input.attrs)?;
 
+    naming::reject_container_rename(
+        &input.attrs,
+        "`#[zlink(rename)]` has no effect on the `ReplyError` derive: error names are qualified \
+         by `#[zlink(interface)]`. Rename individual variants instead.",
+    )?;
+    let rename_all = naming::parse_rename_all(&input.attrs)?;
+
     let expanded = match &input.data {
         Data::Enum(data_enum) => {
-            let error_variants = generate_error_definitions(data_enum, &crate_path)?;
+            let error_variants = generate_error_definitions(data_enum, &crate_path, rename_all)?;
 
             quote! {
                 impl #impl_generics #crate_path::introspect::ReplyError for #name #ty_generics #where_clause {
@@ -54,11 +61,17 @@ fn derive_reply_error_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
 fn generate_error_definitions(
     data_enum: &DataEnum,
     crate_path: &TokenStream2,
+    rename_all: Option<naming::RenameAll>,
 ) -> Result<Vec<TokenStream2>, Error> {
     let mut error_variants = Vec::new();
 
     for variant in &data_enum.variants {
-        let variant_name = variant.ident.to_string();
+        let variant_name = naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
+        // The variant's own `rename_all` governs its fields, kept separate from the enum-level
+        // rule above, which governs variant names instead. Parsed unconditionally (even for unit
+        // variants, which have no fields to apply it to) so a bogus value is always rejected,
+        // matching the wire derive's `generate_serialize_variant_arm`.
+        let field_rename_all = naming::parse_rename_all(&variant.attrs)?;
 
         match &variant.fields {
             Fields::Unit => {
@@ -70,16 +83,11 @@ fn generate_error_definitions(
                 error_variants.push(error_variant);
             }
             Fields::Named(fields) => {
-                // `rename_all` is deliberately not honored here yet: the wire `ReplyError`
-                // derive doesn't understand it either, so the two must start honoring it
-                // together, or the IDL would describe field names the wire doesn't actually
-                // send. Field-level `#[zlink(rename)]` is unaffected, since the wire derive
-                // already honors that.
                 let (field_statics, field_refs) = shared::generate_field_definitions(
                     &Fields::Named(fields.clone()),
                     crate_path,
                     Some(&variant.ident),
-                    None,
+                    field_rename_all,
                 )?;
 
                 let comments = utils::extract_doc_comments(&variant.attrs);
