@@ -150,6 +150,19 @@ pub(crate) fn parse_rename(attrs: &[Attribute]) -> Result<Option<LitStr>, Error>
     parse_zlink_lit_str(attrs, "rename")
 }
 
+/// The unraw'd name of an ident: its leading `r#`, if any, stripped off.
+///
+/// `r#` (e.g. `r#type`) is Rust syntax that lets a keyword be used as an identifier; it is never
+/// part of the name itself, so it must not leak into the IDL or onto the wire.
+pub(crate) fn unraw(ident: &Ident) -> String {
+    let name = ident.to_string();
+
+    match name.strip_prefix("r#") {
+        Some(stripped) => stripped.to_owned(),
+        None => name,
+    }
+}
+
 fn resolve<F>(
     attrs: &[Attribute],
     ident: &Ident,
@@ -163,7 +176,7 @@ where
         return Ok(lit.value());
     }
 
-    let ident = ident.to_string();
+    let ident = unraw(ident);
 
     Ok(match rename_all {
         Some(rule) => apply(rule, &ident),
@@ -281,6 +294,20 @@ mod tests {
         let ident: Ident = parse_quote!(user_id);
 
         assert_eq!(field_name(&attrs, &ident, None).unwrap(), "user_id");
+    }
+
+    #[test]
+    fn unraw_strips_the_prefix() {
+        let ident: Ident = parse_quote!(r#type);
+
+        assert_eq!(unraw(&ident), "type");
+    }
+
+    #[test]
+    fn unraw_leaves_a_normal_ident_unchanged() {
+        let ident: Ident = parse_quote!(user_id);
+
+        assert_eq!(unraw(&ident), "user_id");
     }
 
     #[test]

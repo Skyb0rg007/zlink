@@ -80,6 +80,69 @@ fn custom_enum_container_rename() {
     assert_eq!(variants[0].name(), "low");
 }
 
+#[test]
+fn custom_type_raw_ident_container_name_is_unraw_d() {
+    let idl::CustomType::Object(obj) = Foo::CUSTOM_TYPE else {
+        panic!("expected an object custom type");
+    };
+
+    assert_eq!(obj.name(), "Foo", "must not be r#Foo");
+}
+
+#[test]
+fn raw_ident_custom_type_keeps_type_reference_in_sync() {
+    // Same sync property as `custom_type_rename_keeps_type_reference_in_sync` above, but for the
+    // no-explicit-rename path: the container name comes straight from the (unraw'd) Rust ident.
+    assert_eq!(Foo::TYPE, &idl::Type::Custom("Foo"));
+}
+
+#[test]
+fn raw_ident_field_name_is_unraw_d() {
+    // `r#type` must not panic (the static ident derived from it must not carry `r#`), and the
+    // IDL name must not carry `r#` either: `r#type` is not valid Varlink.
+    let idl::Type::Object(fields) = RawField::TYPE else {
+        panic!("expected an object type");
+    };
+    let fields: Vec<_> = fields.iter().collect();
+
+    assert_eq!(fields[0].name(), "type");
+}
+
+#[test]
+fn raw_ident_field_rename_all_applies_to_the_unraw_d_name() {
+    let idl::Type::Object(fields) = RawFieldUppercased::TYPE else {
+        panic!("expected an object type");
+    };
+    let fields: Vec<_> = fields.iter().collect();
+
+    assert_eq!(fields[0].name(), "TYPE", "must not be R#TYPE");
+}
+
+#[test]
+fn raw_ident_field_explicit_rename_wins() {
+    // This asserted value ("kind") is produced by `resolve` whether or not the ident is unraw'd
+    // first, so it does not by itself pin the fix. What this test actually guards is that the
+    // `RawFieldRenamed` fixture below compiles at all: the static field ident is derived from the
+    // (unraw'd) Rust ident `r#type`, not from the resolved "kind" name. Reverting the fix makes
+    // this fail to compile with `` `"FIELD_R#TYPE"` is not a valid identifier ``.
+    let idl::Type::Object(fields) = RawFieldRenamed::TYPE else {
+        panic!("expected an object type");
+    };
+    let fields: Vec<_> = fields.iter().collect();
+
+    assert_eq!(fields[0].name(), "kind");
+}
+
+#[test]
+fn raw_ident_variant_name_is_unraw_d() {
+    let idl::Type::Enum(variants) = RawVariant::TYPE else {
+        panic!("expected an enum type");
+    };
+    let variants: Vec<_> = variants.iter().collect();
+
+    assert_eq!(variants[0].name(), "fn");
+}
+
 // `#[allow(unused)]` on test types matches the convention already used throughout
 // `tests/introspect-type.rs`: the fields exist only to be described, never read.
 
@@ -130,4 +193,36 @@ struct Record {
 enum Level {
     Low,
     High,
+}
+
+#[derive(Type)]
+#[allow(unused)]
+struct RawField {
+    r#type: String,
+}
+
+#[derive(Type)]
+#[allow(unused)]
+#[zlink(rename_all = "UPPERCASE")]
+struct RawFieldUppercased {
+    r#type: String,
+}
+
+#[derive(Type)]
+#[allow(unused)]
+struct RawFieldRenamed {
+    #[zlink(rename = "kind")]
+    r#type: String,
+}
+
+#[derive(Type)]
+#[allow(unused, non_camel_case_types)]
+enum RawVariant {
+    r#fn,
+}
+
+#[derive(CustomType)]
+#[allow(unused)]
+struct r#Foo {
+    value: String,
 }

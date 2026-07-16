@@ -23,7 +23,7 @@ fn derive_custom_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
     let name = &input.ident;
     let name_str = match naming::parse_rename(&input.attrs)? {
         Some(lit) => lit.value(),
-        None => name.to_string(),
+        None => naming::unraw(name),
     };
     let rename_all = naming::parse_rename_all(&input.attrs)?;
     let generics = &input.generics;
