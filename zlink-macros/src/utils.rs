@@ -30,9 +30,7 @@ pub(crate) fn parse_crate_path(attrs: &[Attribute]) -> Result<TokenStream2, Erro
                     let crate_path = lit_str.value();
                     result = Some(syn::parse_str(&crate_path)?);
                 } else {
-                    // Skip unknown attributes by consuming their values
-                    let _ = meta.value()?;
-                    let _: syn::Expr = meta.input.parse()?;
+                    skip_unknown_meta(&meta)?;
                 }
                 Ok(())
             })?;
@@ -44,6 +42,23 @@ pub(crate) fn parse_crate_path(attrs: &[Attribute]) -> Result<TokenStream2, Erro
     }
     // Default to ::zlink
     Ok(quote! { ::zlink })
+}
+
+/// Consume an unknown `#[zlink(..)]` key's payload so the surrounding walk can continue.
+///
+/// Keys come in three shapes: bare (`borrow`), name-value (`crate = "x"`) and list (`foo(..)`).
+/// Bare keys have no payload to consume, so peeking first avoids failing the whole walk.
+pub(crate) fn skip_unknown_meta(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<()> {
+    if meta.input.peek(syn::Token![=]) {
+        let value = meta.value()?;
+        let _: syn::Expr = value.parse()?;
+    } else if meta.input.peek(syn::token::Paren) {
+        let content;
+        syn::parenthesized!(content in meta.input);
+        let _: proc_macro2::TokenStream = content.parse()?;
+    }
+
+    Ok(())
 }
 
 /// Extract doc comments from attributes.
@@ -284,6 +299,8 @@ pub(crate) fn has_zlink_bool_attr(attrs: &[Attribute], key: &str) -> bool {
         let _ = attr.parse_nested_meta(|meta| {
             if meta.path.is_ident(key) {
                 found = true;
+            } else {
+                skip_unknown_meta(&meta)?;
             }
             Ok(())
         });
@@ -314,9 +331,7 @@ pub(crate) fn parse_zlink_string_attr(attrs: &[Attribute], key: &str) -> Option<
                 let lit_str: syn::LitStr = value.parse()?;
                 result = Some(lit_str.value());
             } else {
-                // Skip unknown attributes by consuming their values
-                let _ = meta.value()?;
-                let _: syn::Expr = meta.input.parse()?;
+                skip_unknown_meta(&meta)?;
             }
             Ok(())
         });
@@ -326,4 +341,36 @@ pub(crate) fn parse_zlink_string_attr(attrs: &[Attribute], key: &str) -> Option<
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::parse_quote;
+
+    #[test]
+    fn string_attr_after_valueless_key() {
+        let attr: Attribute = parse_quote!(#[zlink(borrow, rename = "actualName")]);
+        assert_eq!(
+            parse_zlink_string_attr(&[attr], "rename").as_deref(),
+            Some("actualName"),
+        );
+    }
+
+    #[test]
+    fn string_attr_before_valueless_key() {
+        let attr: Attribute = parse_quote!(#[zlink(rename = "actualName", borrow)]);
+        assert_eq!(
+            parse_zlink_string_attr(&[attr], "rename").as_deref(),
+            Some("actualName"),
+        );
+    }
+
+    #[cfg(feature = "introspection")]
+    #[test]
+    fn crate_path_after_valueless_key() {
+        let attr: Attribute = parse_quote!(#[zlink(borrow, crate = "crate")]);
+        let path = parse_crate_path(&[attr]).unwrap();
+        assert_eq!(path.to_string(), "crate");
+    }
 }
