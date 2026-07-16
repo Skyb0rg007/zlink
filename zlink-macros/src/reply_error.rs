@@ -2,7 +2,10 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DataEnum, DeriveInput, Error, Fields, FieldsNamed, parse_quote};
 
-use crate::utils::{convert_type_lifetimes, has_zlink_bool_attr, parse_zlink_string_attr};
+use crate::{
+    naming::{self, RenameAll},
+    utils::{convert_type_lifetimes, has_zlink_bool_attr},
+};
 
 /// Main entry point for the `ReplyError` derive macro that generates serde implementations.
 ///
@@ -29,13 +32,20 @@ fn derive_reply_error_impl(input: &DeriveInput) -> Result<TokenStream2, Error> {
     // Parse the interface from zlink attributes (mandatory).
     let interface = parse_interface_from_attrs(&input.attrs)?;
 
+    naming::reject_container_rename(
+        &input.attrs,
+        "`#[zlink(rename)]` has no effect on the `ReplyError` derive: error names are qualified \
+         by `#[zlink(interface)]`. Rename individual variants instead.",
+    )?;
+
     let data_enum = extract_enum_data(&input.data)?;
 
     // Validate that enum variants are supported.
     validate_enum_variants(data_enum)?;
 
     // Generate manual Serialize implementation (still custom for variant naming).
-    let serialize_impl = generate_serialize_impl(name, data_enum, generics, &interface)?;
+    let serialize_impl =
+        generate_serialize_impl(name, data_enum, generics, &interface, &input.attrs)?;
 
     // For Deserialize, generate a helper enum with serde derives and convert to original.
     let deserialize_impl = generate_deserialize_with_derive(input, data_enum, &interface)?;
@@ -115,15 +125,19 @@ fn generate_serialize_impl(
     data_enum: &DataEnum,
     generics: &syn::Generics,
     interface: &str,
+    input_attrs: &[syn::Attribute],
 ) -> Result<TokenStream2, Error> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let has_lifetimes = !generics.lifetimes().collect::<Vec<_>>().is_empty();
 
+    let rename_all = naming::parse_rename_all(input_attrs)?;
     // Generate match arms for each variant (empty for empty enums).
     let variant_arms = data_enum
         .variants
         .iter()
-        .map(|variant| generate_serialize_variant_arm(variant, interface, has_lifetimes))
+        .map(|variant| {
+            generate_serialize_variant_arm(variant, interface, has_lifetimes, rename_all)
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     // For empty enums, we need to dereference self to match the uninhabited type.
@@ -151,9 +165,12 @@ fn generate_serialize_variant_arm(
     variant: &syn::Variant,
     interface: &str,
     has_lifetimes: bool,
+    rename_all: Option<RenameAll>,
 ) -> Result<TokenStream2, Error> {
     let variant_name = &variant.ident;
-    let qualified_name = format!("{interface}.{variant_name}");
+    let resolved = naming::variant_name(&variant.attrs, variant_name, rename_all)?;
+    let qualified_name = format!("{interface}.{resolved}");
+    let field_rename_all = naming::parse_rename_all(&variant.attrs)?;
 
     match &variant.fields {
         // Unit variant - serialize as tagged enum with just error field.
@@ -167,7 +184,7 @@ fn generate_serialize_variant_arm(
         }),
         Fields::Named(fields) => {
             // Named fields - serialize as tagged enum with parameters.
-            let field_info = FieldInfo::extract(fields);
+            let field_info = FieldInfo::extract(fields, field_rename_all)?;
             let field_count = field_info.names.len();
             let field_names = &field_info.names;
             let field_types = &field_info.types;
@@ -237,28 +254,32 @@ fn generate_deserialize_with_derive(
     let generics = &input.generics;
 
     // First extract field info for all variants from the original enum.
-    let variant_field_info: Vec<_> = data_enum
+    let variant_field_info: Vec<Option<FieldInfo<'_>>> = data_enum
         .variants
         .iter()
-        .map(|variant| {
-            if let Fields::Named(fields) = &variant.fields {
-                Some(FieldInfo::extract(fields))
-            } else {
-                None
+        .map(|variant| match &variant.fields {
+            Fields::Named(fields) => {
+                let rename_all = naming::parse_rename_all(&variant.attrs)?;
+                FieldInfo::extract(fields, rename_all).map(Some)
             }
+            _ => Ok(None),
         })
-        .collect();
+        .collect::<Result<Vec<_>, Error>>()?;
 
     // Clone and modify the enum to add serde attributes.
     let mut modified_enum = data_enum.clone();
 
+    let rename_all = naming::parse_rename_all(&input.attrs)?;
+
     // Now modify the variants.
     for (i, variant) in modified_enum.variants.iter_mut().enumerate() {
         let field_info = &variant_field_info[i];
-        let variant_name = &variant.ident;
-        let qualified_name = format!("{interface}.{variant_name}");
+        let resolved = naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
+        let qualified_name = format!("{interface}.{resolved}");
 
-        // Add rename attribute for the variant.
+        // Strip our helper attributes before they reach the generated helper enum, which only
+        // derives `Deserialize` and so has nothing to declare `zlink`.
+        variant.attrs.retain(|attr| !attr.path().is_ident("zlink"));
         variant
             .attrs
             .push(parse_quote!(#[serde(rename = #qualified_name)]));
@@ -367,37 +388,28 @@ struct FieldInfo<'a> {
 
 impl<'a> FieldInfo<'a> {
     /// Extract field information from named fields to avoid duplication.
-    fn extract(fields: &'a FieldsNamed) -> Self {
-        let field_data: Vec<_> = fields
-            .named
-            .iter()
-            .filter_map(|f| {
-                f.ident.as_ref().map(|name| {
-                    let serialized_name = Self::get_serialized_name(f, name);
-                    let borrow = has_zlink_bool_attr(&f.attrs, "borrow");
-                    (name, &f.ty, serialized_name, borrow)
-                })
-            })
-            .collect();
+    fn extract(fields: &'a FieldsNamed, rename_all: Option<RenameAll>) -> Result<Self, Error> {
+        let mut names = Vec::new();
+        let mut types = Vec::new();
+        let mut name_strings = Vec::new();
+        let mut borrow_flags = Vec::new();
 
-        let names: Vec<_> = field_data.iter().map(|(name, _, _, _)| *name).collect();
-        let types: Vec<_> = field_data.iter().map(|(_, ty, _, _)| *ty).collect();
-        let name_strings: Vec<String> = field_data
-            .iter()
-            .map(|(_, _, sname, _)| sname.clone())
-            .collect();
-        let borrow_flags: Vec<bool> = field_data.iter().map(|(_, _, _, borrow)| *borrow).collect();
+        for field in &fields.named {
+            let Some(name) = field.ident.as_ref() else {
+                continue;
+            };
 
-        Self {
+            names.push(name);
+            types.push(&field.ty);
+            name_strings.push(naming::field_name(&field.attrs, name, rename_all)?);
+            borrow_flags.push(has_zlink_bool_attr(&field.attrs, "borrow"));
+        }
+
+        Ok(Self {
             names,
             types,
             name_strings,
             borrow_flags,
-        }
-    }
-
-    /// Extract the serialized name from field attributes or use the field name.
-    fn get_serialized_name(field: &syn::Field, default_name: &syn::Ident) -> String {
-        parse_zlink_string_attr(&field.attrs, "rename").unwrap_or_else(|| default_name.to_string())
+        })
     }
 }

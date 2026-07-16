@@ -2,7 +2,10 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{DataEnum, Error, Fields, FieldsNamed, FieldsUnnamed};
 
-use crate::utils;
+use crate::{
+    naming::{self, RenameAll},
+    utils,
+};
 
 /// Generate comment objects from a list of comments.
 pub(crate) fn generate_comment_objects(
@@ -22,6 +25,7 @@ pub(super) fn generate_field_definitions(
     fields: &Fields,
     crate_path: &TokenStream2,
     variant_prefix: Option<&syn::Ident>,
+    rename_all: Option<RenameAll>,
 ) -> Result<(Vec<TokenStream2>, Vec<TokenStream2>), Error> {
     match fields {
         Fields::Named(FieldsNamed { named, .. }) => {
@@ -35,7 +39,7 @@ pub(super) fn generate_field_definitions(
                     .ok_or_else(|| Error::new_spanned(field, "Field must have a name"))?;
 
                 let field_type = utils::remove_lifetimes_from_type(&field.ty);
-                let field_name_str = field_name.to_string();
+                let field_name_str = naming::field_name(&field.attrs, field_name, rename_all)?;
 
                 let static_name = if let Some(variant_ident) = variant_prefix {
                     quote::format_ident!(
@@ -82,6 +86,7 @@ pub(super) fn generate_field_definitions(
 pub(super) fn generate_enum_variant_definitions(
     data_enum: &DataEnum,
     crate_path: &TokenStream2,
+    rename_all: Option<RenameAll>,
 ) -> Result<Vec<TokenStream2>, Error> {
     let mut variant_refs = Vec::new();
 
@@ -89,7 +94,8 @@ pub(super) fn generate_enum_variant_definitions(
         // Only support unit variants (no associated data).
         match &variant.fields {
             Fields::Unit => {
-                let variant_name = variant.ident.to_string();
+                let variant_name =
+                    naming::variant_name(&variant.attrs, &variant.ident, rename_all)?;
                 let comments = utils::extract_doc_comments(&variant.attrs);
                 let comment_objects = generate_comment_objects(&comments, crate_path);
                 let variant_ref = quote! {

@@ -21,6 +21,16 @@ enum TestError<'a> {
         #[zlink(rename = "optionalData")]
         _optional: Option<&'a str>,
     },
+    // `borrow` before `rename` on one attribute must not drop the rename.
+    BorrowThenRename {
+        #[zlink(borrow, rename = "borrowedMessage")]
+        _message: std::borrow::Cow<'a, str>,
+    },
+    // `rename` before `borrow` on one attribute must not drop the borrow.
+    RenameThenBorrow {
+        #[zlink(rename = "renamedMessage", borrow)]
+        _message: std::borrow::Cow<'a, str>,
+    },
 }
 
 #[cfg(test)]
@@ -116,6 +126,33 @@ mod tests {
         let json_with_original_names = r#"{"error":"com.example.Test.RenamedFields","parameters":{"_internal_name":"test_value","_code":42}}"#;
         let result: Result<TestError, _> = serde_json::from_str(json_with_original_names);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn borrow_before_rename_is_honored() {
+        let error = TestError::BorrowThenRename {
+            _message: std::borrow::Cow::Borrowed("hi"),
+        };
+        let json = serde_json::to_string(&error).unwrap();
+
+        assert!(json.contains("borrowedMessage"), "rename dropped: {json}");
+        assert!(!json.contains("_message"), "field not renamed: {json}");
+    }
+
+    #[test]
+    fn rename_before_borrow_is_honored() {
+        // No escapes in the value, so a zero-copy borrow is possible.
+        let json =
+            r#"{"error":"com.example.Test.RenameThenBorrow","parameters":{"renamedMessage":"hi"}}"#;
+
+        let TestError::RenameThenBorrow { _message } = serde_json::from_str(json).unwrap() else {
+            panic!("wrong variant deserialized");
+        };
+
+        assert!(
+            matches!(_message, std::borrow::Cow::Borrowed(_)),
+            "borrow dropped: field was owned instead of borrowed",
+        );
     }
 
     #[test]
