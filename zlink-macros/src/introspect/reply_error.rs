@@ -70,10 +70,16 @@ fn generate_error_definitions(
                 error_variants.push(error_variant);
             }
             Fields::Named(fields) => {
+                // `rename_all` is deliberately not honored here yet: the wire `ReplyError`
+                // derive doesn't understand it either, so the two must start honoring it
+                // together, or the IDL would describe field names the wire doesn't actually
+                // send. Field-level `#[zlink(rename)]` is unaffected, since the wire derive
+                // already honors that.
                 let (field_statics, field_refs) = shared::generate_field_definitions(
                     &Fields::Named(fields.clone()),
                     crate_path,
                     Some(&variant.ident),
+                    None,
                 )?;
 
                 let comments = utils::extract_doc_comments(&variant.attrs);

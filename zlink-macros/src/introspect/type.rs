@@ -2,7 +2,10 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DataEnum, DeriveInput, Error, Fields};
 
-use crate::utils;
+use crate::{
+    naming::{self, RenameAll},
+    utils,
+};
 
 use super::shared;
 
@@ -21,11 +24,18 @@ fn derive_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let crate_path = utils::parse_crate_path(&input.attrs)?;
+    naming::reject_container_rename(
+        &input.attrs,
+        "`#[zlink(rename)]` has no effect on the `Type` derive, which generates an anonymous \
+         object type. Derive `CustomType` instead if the type needs a name in the IDL.",
+    )?;
+    let rename_all = naming::parse_rename_all(&input.attrs)?;
 
     let expanded = match &input.data {
         Data::Struct(data_struct) => {
             let fields = &data_struct.fields;
-            let (field_statics, field_refs) = generate_field_definitions(fields, &crate_path)?;
+            let (field_statics, field_refs) =
+                generate_field_definitions(fields, &crate_path, rename_all)?;
 
             quote! {
                 impl #impl_generics #crate_path::introspect::Type for #name #ty_generics #where_clause {
@@ -42,7 +52,8 @@ fn derive_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
             }
         }
         Data::Enum(data_enum) => {
-            let variant_refs = generate_enum_variant_definitions(data_enum, &crate_path)?;
+            let variant_refs =
+                generate_enum_variant_definitions(data_enum, &crate_path, rename_all)?;
 
             quote! {
                 impl #impl_generics #crate_path::introspect::Type for #name #ty_generics #where_clause {
@@ -70,13 +81,15 @@ fn derive_type_impl(input: DeriveInput) -> Result<TokenStream2, Error> {
 fn generate_field_definitions(
     fields: &Fields,
     crate_path: &TokenStream2,
+    rename_all: Option<RenameAll>,
 ) -> Result<(Vec<TokenStream2>, Vec<TokenStream2>), Error> {
-    shared::generate_field_definitions(fields, crate_path, None)
+    shared::generate_field_definitions(fields, crate_path, None, rename_all)
 }
 
 fn generate_enum_variant_definitions(
     data_enum: &DataEnum,
     crate_path: &TokenStream2,
+    rename_all: Option<RenameAll>,
 ) -> Result<Vec<TokenStream2>, Error> {
-    shared::generate_enum_variant_definitions(data_enum, crate_path)
+    shared::generate_enum_variant_definitions(data_enum, crate_path, rename_all)
 }

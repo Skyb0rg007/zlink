@@ -12,6 +12,8 @@
 
 mod utils;
 
+mod naming;
+
 #[cfg(feature = "introspection")]
 mod introspect;
 
