@@ -72,6 +72,32 @@ mod service;
 /// }
 /// ```
 ///
+/// # Renaming
+///
+/// - `#[zlink(rename = "...")]` on a field or variant sets its name in the IDL.
+/// - `#[zlink(rename_all = "...")]` on a struct applies a case convention to its fields, and on an
+///   enum to its variant names. An explicit `rename` on an item overrides it.
+///
+/// Valid `rename_all` values are `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`,
+/// `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case` and `SCREAMING-KEBAB-CASE`. They mean the
+/// same as they do in serde.
+///
+/// These attributes do not affect serialization. On a type that also derives serde traits, state
+/// the same renaming to serde, or the IDL will not describe what is actually sent:
+///
+/// ```rust
+/// use serde::Serialize;
+/// use zlink::introspect::Type;
+///
+/// #[derive(Serialize, Type)]
+/// #[serde(rename_all = "camelCase")]
+/// #[zlink(rename_all = "camelCase")]
+/// struct Membership {
+///     user_name: String,
+///     group_name: String,
+/// }
+/// ```
+///
 /// # Examples
 ///
 /// ## Named Structs
@@ -211,6 +237,33 @@ pub fn derive_introspect_type(input: proc_macro::TokenStream) -> proc_macro::Tok
 /// * `#[zlink(crate = "path")]` - Specifies the crate path to use for zlink types. Defaults to
 ///   `::zlink`.
 ///
+/// # Renaming
+///
+/// - `#[zlink(rename = "...")]` on a field or variant sets its name in the IDL.
+/// - `#[zlink(rename_all = "...")]` on a struct applies a case convention to its fields, and on an
+///   enum to its variant names. An explicit `rename` on an item overrides it.
+/// - `#[zlink(rename = "...")]` on the type itself sets the name of the custom type in the IDL.
+///
+/// Valid `rename_all` values are `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`,
+/// `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case` and `SCREAMING-KEBAB-CASE`. They mean the
+/// same as they do in serde.
+///
+/// These attributes do not affect serialization. On a type that also derives serde traits, state
+/// the same renaming to serde, or the IDL will not describe what is actually sent:
+///
+/// ```rust
+/// use serde::Serialize;
+/// use zlink::introspect::CustomType;
+///
+/// #[derive(Serialize, CustomType)]
+/// #[serde(rename_all = "camelCase")]
+/// #[zlink(rename_all = "camelCase")]
+/// struct Membership {
+///     user_name: String,
+///     group_name: String,
+/// }
+/// ```
+///
 /// # Examples
 ///
 /// ## Named Structs
@@ -298,6 +351,33 @@ pub fn derive_introspect_custom_type(input: proc_macro::TokenStream) -> proc_mac
 ///
 /// * `#[zlink(crate = "path")]` - Specifies the crate path to use for zlink types. Defaults to
 ///   `::zlink`.
+///
+/// # Renaming
+///
+/// - `#[zlink(rename = "...")]` on a field or variant sets its name in the IDL.
+/// - `#[zlink(rename_all = "...")]` on the enum applies to error names, and on a variant to that
+///   variant's fields. An explicit `rename` on an item overrides it. Error names in the IDL are
+///   unqualified; the interface comes from `#[zlink(interface)]`.
+///
+/// Valid `rename_all` values are `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`,
+/// `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case` and `SCREAMING-KEBAB-CASE`. They mean the
+/// same as they do in serde.
+///
+/// These attributes do not affect serialization on their own. [`macro@ReplyError`] reads the same
+/// `#[zlink(rename)]` and `#[zlink(rename_all)]` attributes, so deriving both on the same enum
+/// (the usual pairing) keeps the wire format and the IDL in sync automatically. Any other type
+/// that separately derives serde traits still needs the same renaming stated to serde, or the IDL
+/// will not describe what is actually sent:
+///
+/// ```rust
+/// use zlink::{ReplyError, introspect};
+///
+/// #[derive(ReplyError, introspect::ReplyError)]
+/// #[zlink(interface = "org.example.Test", rename_all = "SCREAMING_SNAKE_CASE")]
+/// enum ServiceError {
+///     NotFound,
+/// }
+/// ```
 ///
 /// # Example
 ///
@@ -923,6 +1003,12 @@ pub fn proxy(
 ///
 /// - `interface` - This mandatory attribute specifies the Varlink interface name (e.g.,
 ///   "org.varlink.service")
+/// - `rename_all = "..."` - Applies a case convention to every variant name
+///
+/// ## Variant-level attributes
+///
+/// - `rename = "..."` - Specifies a custom name for the variant in the serialized error name
+/// - `rename_all = "..."` - Applies a case convention to this variant's fields
 ///
 /// ## Field-level attributes
 ///
@@ -954,7 +1040,9 @@ pub fn proxy(
 ///         message: Cow<'a, str>,
 ///     },
 ///
-///     // Variant with renamed field
+///     // Variant with a renamed error name: serialized as
+///     // "com.example.MyService.TimedOut".
+///     #[zlink(rename = "TimedOut")]
 ///     Timeout {
 ///         #[zlink(rename = "timeoutSeconds")]
 ///         seconds: u32,
