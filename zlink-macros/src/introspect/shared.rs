@@ -44,11 +44,11 @@ pub(super) fn generate_field_definitions(
                 let static_name = if let Some(variant_ident) = variant_prefix {
                     quote::format_ident!(
                         "FIELD_{}_{}",
-                        variant_ident.to_string().to_uppercase(),
-                        field_name.to_string().to_uppercase()
+                        naming::unraw(variant_ident).to_uppercase(),
+                        naming::unraw(field_name).to_uppercase()
                     )
                 } else {
-                    quote::format_ident!("FIELD_{}", field_name.to_string().to_uppercase())
+                    quote::format_ident!("FIELD_{}", naming::unraw(field_name).to_uppercase())
                 };
 
                 let comments = utils::extract_doc_comments(&field.attrs);
