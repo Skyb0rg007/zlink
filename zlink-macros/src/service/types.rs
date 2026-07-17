@@ -24,13 +24,14 @@ pub(super) struct ParamInfo {
 impl ParamInfo {
     /// The parameter name used on the wire (and in the IDL).
     ///
-    /// This is the explicit `#[zlink(rename = "...")]` name if provided, the Rust parameter
-    /// name otherwise. Parameter names starting with `_` are rejected at extraction time, so
-    /// this is always a valid Varlink field name.
+    /// This is the explicit `#[zlink(rename = "...")]` name if provided, the unraw'd Rust
+    /// parameter name otherwise. Unrawing is what keeps the IDL and the wire in agreement: serde
+    /// unraws the name it deserializes, so an `r#`-prefixed IDL name would advertise a parameter
+    /// the method could never accept.
     pub(super) fn wire_name(&self) -> Cow<'_, str> {
         match &self.serialized_name {
             Some(name) => Cow::Borrowed(name),
-            None => Cow::Owned(self.name.to_string()),
+            None => Cow::Owned(crate::naming::unraw(&self.name)),
         }
     }
 

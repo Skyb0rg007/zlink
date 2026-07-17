@@ -21,6 +21,8 @@ mod metadata;
 mod multiple_interfaces;
 #[path = "service/per_interface_types.rs"]
 mod per_interface_types;
+#[path = "service/raw_idents.rs"]
+mod raw_idents;
 #[path = "service/streaming.rs"]
 mod streaming;
 #[path = "service/streaming_errors.rs"]
