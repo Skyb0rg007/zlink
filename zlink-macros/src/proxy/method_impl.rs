@@ -21,7 +21,9 @@ pub(super) fn generate_method_impl(
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
 ) -> Result<TokenStream, Error> {
     let method_name = &method.sig.ident;
-    let method_name_str = method_name.to_string();
+    // Only the wire name is unraw'd; the generated fn keeps the raw ident so it still matches the
+    // trait it implements.
+    let method_name_str = crate::naming::unraw(method_name);
 
     let converted_name = snake_case_to_pascal_case(&method_name_str);
     let actual_method_name = method_attrs.rename.as_deref().unwrap_or(&converted_name);

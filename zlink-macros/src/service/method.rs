@@ -65,10 +65,11 @@ impl MethodInfo {
             *current_interface = Some(iface.clone());
         }
 
-        // Determine the Varlink method name.
+        // Determine the Varlink method name. The ident is unraw'd first: `r#` is Rust syntax, not
+        // part of the name, and it would otherwise reach `format_ident!` as `R#type`.
         let varlink_name = method_attrs
             .rename
-            .unwrap_or_else(|| snake_case_to_pascal_case(&name.to_string()));
+            .unwrap_or_else(|| snake_case_to_pascal_case(&crate::naming::unraw(&name)));
 
         // Check if this is a streaming method.
         let is_streaming = method_attrs.is_streaming;
@@ -119,7 +120,8 @@ impl MethodInfo {
             .iter()
             .filter(|p| !p.is_connection && !p.is_more && !p.is_fds)
         {
-            if param.serialized_name.is_none() && param.name.to_string().starts_with('_') {
+            if param.serialized_name.is_none() && crate::naming::unraw(&param.name).starts_with('_')
+            {
                 return Err(Error::new_spanned(
                     &param.name,
                     "parameter names starting with `_` are not valid Varlink field names; \
@@ -671,4 +673,32 @@ pub(super) fn extract_first_tuple_element(ty: &Type) -> Option<Type> {
         return None;
     };
     tuple.elems.first().cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::{FnArg, parse_quote};
+
+    /// The `_` check must judge the same string `ParamInfo::wire_name` does, or a raw ident slips
+    /// past it and reaches the IDL unraw'd as `_foo`.
+    #[test]
+    fn underscore_prefixed_params_rejected_raw_or_not() {
+        for src in ["_foo: String", "r#_foo: String"] {
+            let param: FnArg = syn::parse_str(src).unwrap();
+            let mut method: ImplItemFn = parse_quote! {
+                async fn probe(&self, #param) -> Result<Reply, Error> { todo!() }
+            };
+            let mut interface = Some("org.example.probe".to_owned());
+
+            let Err(err) = MethodInfo::extract(&mut method, &mut interface) else {
+                panic!("`{src}` must be rejected: it reaches the IDL as `_foo`");
+            };
+
+            assert!(
+                err.to_string().contains("not valid Varlink field names"),
+                "unexpected error for `{src}`: {err}"
+            );
+        }
+    }
 }

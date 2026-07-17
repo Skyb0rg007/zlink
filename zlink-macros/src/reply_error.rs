@@ -360,6 +360,9 @@ fn generate_deserialize_with_derive(
             where
                 D: serde::Deserializer<'de>,
             {
+                // Nested in a function body, so the user's own `#[allow]` on their enum cannot
+                // reach the variants cloned in here, and they cannot annotate this item.
+                #[allow(non_camel_case_types)]
                 #[derive(serde::Deserialize)]
                 #[serde(tag = "error", content = "parameters")]
                 enum __ZlinkDeserHelper #orig_impl_generics #orig_where_clause {
