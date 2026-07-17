@@ -1,4 +1,7 @@
 #![cfg(feature = "introspection")]
+// Denied here rather than left to the test runner's flags, so that the `ProbeError` fixture below
+// keeps proving the generated `Deserialize` helper carries its own `#[allow]`.
+#![deny(non_camel_case_types)]
 
 use serde_json::json;
 use zlink::{ReplyError, introspect};
@@ -137,12 +140,12 @@ fn idl_and_wire_agree_on_raw_ident_field_name() {
 // `FIELD_{VARIANT}_{FIELD}` static-name path in `introspect/shared.rs`, which only runs when the
 // *variant* ident is also raw. Cover that combination here.
 //
-// The variant is named `r#Fn` rather than the keyword-driven `r#fn`: the wire `ReplyError` derive
-// clones variants into an internal helper enum for `Deserialize` that does not inherit this
-// enum's `#[allow(non_camel_case_types)]`, so a lowercase raw ident would fail
-// `clippy -D warnings` independently of the fix under test. `r#Fn` is a redundant (but legal) raw
-// ident on an already-PascalCase word: `Ident::to_string()` still yields it with the `r#` prefix,
-// so it exercises the same `naming::unraw` call without tripping that unrelated lint.
+// The variant is named `r#Fn` rather than the keyword-driven `r#fn` because a Varlink error name
+// must be PascalCase: `error_def` parses it with `type_name`, which requires an uppercase first
+// letter. `r#fn` would unraw to `fn` and describe an error our own IDL parser rejects. `r#Fn` is a
+// redundant (but legal) raw ident on an already-PascalCase word: `Ident::to_string()` still yields
+// it with the `r#` prefix, so it exercises the same `naming::unraw` call while staying valid
+// Varlink.
 #[derive(Debug, PartialEq, ReplyError, introspect::ReplyError)]
 #[zlink(interface = "org.example.RawVariant")]
 enum RawIdentVariantError {
@@ -180,4 +183,36 @@ fn idl_and_wire_agree_on_raw_ident_variant_and_field_names() {
 
     let fields: Vec<_> = variants[0].fields().collect();
     assert_eq!(fields[0].name(), "type");
+}
+
+// A lowercase variant needs an `#[allow]` on both this enum and the helper the wire derive nests
+// inside `Deserialize::deserialize`, which cannot inherit this one. Dropping the derive's own
+// `#[allow(non_camel_case_types)]` fails this file to compile, pointing here.
+//
+// Only the wire derive is applied: `lowercase` is not a valid Varlink error name (those are
+// PascalCase, as `RawIdentVariantError` above notes), so there is no IDL worth asserting on.
+#[derive(Debug, PartialEq, ReplyError)]
+#[zlink(interface = "org.example.Probe")]
+#[allow(non_camel_case_types)]
+enum ProbeError {
+    lowercase { value: String },
+}
+
+#[test]
+fn lowercase_variant_name_is_allowed_by_the_users_own_allow() {
+    let error = ProbeError::lowercase {
+        value: "x".to_owned(),
+    };
+    let json = serde_json::to_value(&error).unwrap();
+
+    assert_eq!(
+        json,
+        json!({
+            "error": "org.example.Probe.lowercase",
+            "parameters": {"value": "x"},
+        }),
+    );
+
+    let back: ProbeError = serde_json::from_value(json).unwrap();
+    assert_eq!(back, error);
 }
