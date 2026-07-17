@@ -18,7 +18,9 @@ pub(super) fn generate_chain_extension_method(
     crate_path: &TokenStream,
     param_attrs_map: &std::collections::HashMap<String, ParamAttrs>,
 ) -> Result<(TokenStream, TokenStream), Error> {
-    let method_name_str = method.sig.ident.to_string();
+    // Only the wire name is unraw'd; `method_ident` stays raw so the generated fn still matches
+    // the trait it implements.
+    let method_name_str = crate::naming::unraw(&method.sig.ident);
     let method_ident = method.sig.ident.clone();
 
     // Check for explicit lifetimes early
@@ -309,14 +311,14 @@ fn generate_with_params_method(
     let params_struct_name = syn::Ident::new(
         &format!(
             "{}Params",
-            snake_case_to_pascal_case(&method_name.to_string())
+            snake_case_to_pascal_case(&crate::naming::unraw(method_name))
         ),
         method_name.span(),
     );
     let wrapper_enum_name = syn::Ident::new(
         &format!(
             "{}Wrapper",
-            snake_case_to_pascal_case(&method_name.to_string())
+            snake_case_to_pascal_case(&crate::naming::unraw(method_name))
         ),
         method_name.span(),
     );

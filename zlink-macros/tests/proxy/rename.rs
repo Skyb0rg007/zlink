@@ -126,3 +126,86 @@ async fn param_rename_chain_test() {
     assert_eq!(written2["parameters"]["dryRun"], false);
     assert_eq!(written2["parameters"]["configValue"], "another_value");
 }
+
+#[tokio::test]
+async fn raw_ident_method_name() {
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
+
+    #[proxy("org.example.Raw")]
+    trait RawProxy {
+        // The generated fn has to keep the raw ident to match this declaration, while the name it
+        // carries on the wire must not: `r#` is Rust syntax, never part of the name.
+        async fn r#type(&mut self, r#move: i32) -> zlink::Result<Result<(), Error>>;
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Error;
+
+    let responses = json!({}).to_string();
+    let socket = MockSocket::with_responses(&[&responses]);
+    let mut conn = Connection::new(socket);
+
+    conn.r#type(42).await.unwrap().unwrap();
+
+    let bytes_written = conn.write().write_half().written_data();
+    let written: serde_json::Value =
+        serde_json::from_slice(&bytes_written[..bytes_written.len() - 1]).unwrap();
+    assert_eq!(written["method"], "org.example.Raw.Type");
+    assert_eq!(written["parameters"]["move"], 42);
+}
+
+#[tokio::test]
+async fn raw_ident_chain_method() {
+    use futures_util::{pin_mut, stream::StreamExt};
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use zlink::{Connection, proxy, test_utils::mock_socket::MockSocket};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Error;
+
+    #[proxy("org.example.RawChain")]
+    trait RawChainProxy {
+        #[allow(unused)]
+        async fn r#type(&mut self, r#move: i32) -> zlink::Result<Result<(), Error>>;
+    }
+
+    let reply1 = json!({}).to_string();
+    let reply2 = json!({}).to_string();
+    let socket = MockSocket::new(&[&reply1, &reply2], vec![vec![]]);
+    let mut conn = Connection::new(socket);
+
+    {
+        // `chain_type`, not `chain_r#type`; the chain extension method stays raw-named.
+        let replies = conn
+            .chain_type(1)
+            .unwrap()
+            .r#type(2)
+            .unwrap()
+            .send::<(), Error>()
+            .await
+            .unwrap();
+
+        pin_mut!(replies);
+
+        let (reply1, _fds) = replies.next().await.unwrap().unwrap();
+        reply1.unwrap();
+        let (reply2, _fds) = replies.next().await.unwrap().unwrap();
+        reply2.unwrap();
+    }
+
+    let bytes_written = conn.write().write_half().written_data();
+    let messages: Vec<&[u8]> = bytes_written
+        .split(|&b| b == 0)
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert_eq!(messages.len(), 2);
+
+    for (message, expected) in messages.iter().zip([1, 2]) {
+        let written: serde_json::Value = serde_json::from_slice(message).unwrap();
+        assert_eq!(written["method"], "org.example.RawChain.Type");
+        assert_eq!(written["parameters"]["move"], expected);
+    }
+}
